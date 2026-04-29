@@ -1,0 +1,9 @@
+/no-moon /no-moon/index.html 301!
+/no-moon.html /no-moon/index.html 301!
+
+/rift-wake /no-moon/ 301!
+/rift-wake.html /no-moon/ 301!
+/rift-wake/* /no-moon/ 301!
+
+/game /no-moon/ 302
+/play /no-moon/ 302
