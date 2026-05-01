@@ -30834,7 +30834,69 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V49_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v49';
+  // ===================================================================
+  // === v50 — Disable V35 external MP3, restore procedural BGM ========
+  // ===================================================================
+  // V35 added an external MP3 background track and routed all music through
+  // it by default. The original procedural synth-based BGM (the BGM_TEMPO /
+  // BGM_BASS / BGM_ARP / BGM_LEAD / BGM_CHORDS arrays + runBgmScheduler) was
+  // kept intact in the file and captured by V35 as legacyStartProceduralBgm
+  // / legacyStopProceduralBgm. After playtesting, the procedural music feels
+  // better — it's responsive to gameplay state (intensity changes, boss-
+  // active extra hits), and the MP3 is just a static loop.
+  //
+  // V50 disables the V35 external track at install time. V35's existing
+  // gate logic then routes all start/stop/scheduler calls back to the
+  // legacy procedural path. The MP3 is no longer fetched.
+  //
+  // Service worker is also updated (removes the MP3 from ASSETS and the
+  // BGM-asset fetch branch), and the MP3 file itself is deleted from the
+  // repo. V35's IIFE stays — its audio plumbing (filters, limiter, gain)
+  // remains useful even when the external track is disabled.
+  // ===================================================================
+  (function installV50DisableExternalBgm() {
+    const V50_VERSION = 'qual.future-consequence.2026-05-01.v50';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v50DisableExternalBgmSystem = state.v50DisableExternalBgmSystem || {};
+    sys.version = V50_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      FORCE_PROCEDURAL: true
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      disabled: false,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError50(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    try {
+      if (sys.config.ENABLED && sys.config.FORCE_PROCEDURAL && state.v35BackgroundMusicSystem && state.v35BackgroundMusicSystem.config) {
+        state.v35BackgroundMusicSystem.config.USE_EXTERNAL_TRACK = false;
+        sys.stats.disabled = true;
+      }
+    } catch (e) { recordError50(e); }
+
+    state.v50Debug = function() {
+      return {
+        version: V50_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        v35External: !!(state.v35BackgroundMusicSystem && state.v35BackgroundMusicSystem.config && state.v35BackgroundMusicSystem.config.USE_EXTERNAL_TRACK),
+        v49: typeof state.v49Debug === 'function' ? state.v49Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V50_DISABLE_EXTERNAL_BGM__ = sys; } catch (e) {}
+    state.buildTag = V50_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v50';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 

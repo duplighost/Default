@@ -1,5 +1,5 @@
-const CACHE_NAME = 'no-moon-future-consequence-v49';
-const ASSETS = ['./', './index.html', './no-moon-bg-v35.mp3'];
+const CACHE_NAME = 'no-moon-future-consequence-v50';
+const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -28,23 +28,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== location.origin) return;
 
   const isGameDocument = request.mode === 'navigate' || url.pathname.endsWith('/no-moon/') || url.pathname.endsWith('/no-moon/index.html') || url.pathname.endsWith('/index.html');
-  const isBgmAsset = url.pathname.endsWith('/no-moon/no-moon-bg-v35.mp3');
-  if (!isGameDocument && !isBgmAsset) return;
-
-  if (isBgmAsset) {
-    event.respondWith(
-      caches.match(request).then((cached) => cached ||
-        fetch(request).then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-      )
-    );
-    return;
-  }
+  if (!isGameDocument) return;
 
   event.respondWith(
     fetch(request, { cache: 'no-store' })
