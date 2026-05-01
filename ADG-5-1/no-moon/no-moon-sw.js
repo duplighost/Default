@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-future-consequence-v48';
+const CACHE_NAME = 'no-moon-future-consequence-v49';
 const ASSETS = ['./', './index.html', './no-moon-bg-v35.mp3'];
 
 self.addEventListener('install', (event) => {
