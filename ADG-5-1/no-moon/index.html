@@ -28856,7 +28856,25 @@ function drawHudBossMiniStats(p, layout) {
         const w = Math.min((typeof W !== 'undefined' ? W : 1000) - 28, compact ? 360 : 520);
         const h = compact ? 54 : 60;
         const x = ((typeof W !== 'undefined' ? W : 1000) - w) * 0.5;
-        const y = compact ? 74 : 82;
+        // v53: on compact viewports, the side HUD chips (Sunkey on left, Moon Debt
+        // on right) occupy y=74-108+ at the start of a floor — same band the
+        // badge wanted. Compute a safe y below the side chips by mirroring the
+        // Sunkey HUD's offset logic + leaving room for the Moon Debt chip.
+        let y = compact ? 74 : 82;
+        if (compact) {
+          try {
+            const layout = (typeof gameplayUiLayout === 'function') ? gameplayUiLayout() : null;
+            if (layout) {
+              const topChipBottom = layout.topChip ? layout.topChip.y + layout.topChip.h : 74;
+              const starOffset = state.player && (state.player.moonSplinters || 0) > 0 ? 32 : 0;
+              const mkCount = (typeof moonkeyCount43 === 'function') ? moonkeyCount43() : 0;
+              const moonkeyOffset = mkCount > 0 ? 34 : 0;
+              const sunkeyChipBottom = topChipBottom + 8 + starOffset + moonkeyOffset + 26;
+              const moonChipBottom = layout.moonChip ? layout.moonChip.y + layout.moonChip.h : 104;
+              y = Math.max(sunkeyChipBottom, moonChipBottom) + 8;
+            }
+          } catch (innerErr) {}
+        }
         ctx.save();
         ctx.globalAlpha = alpha;
         ctx.fillStyle = 'rgba(4,7,12,0.72)';
@@ -31220,7 +31238,49 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V52_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v52';
+  // ===================================================================
+  // === v53 — Floor-condition badge mobile layout fix ================
+  // ===================================================================
+  // On compact viewports (W < 720), the V43 floor-condition badge sat at
+  // y=74 — exactly where the Sunkey chip (left) and Moon Debt chip
+  // (right) live at floor start. Result: text overlap on mobile, badge
+  // covered by chips, chips covered by badge.
+  //
+  // The fix is an inline edit to V43's drawConditionBadge43 (above):
+  // on compact, position the badge below the side chips using the same
+  // offset logic Sunkey HUD uses, so it stays clear regardless of
+  // whether the player has Stars or Moonkeys collected.
+  //
+  // This V53 IIFE just bumps the build tag and exposes a debug helper.
+  // ===================================================================
+  (function installV53FloorConditionBadgeLayout() {
+    const V53_VERSION = 'qual.future-consequence.2026-05-01.v53';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v53FloorConditionLayoutSystem = state.v53FloorConditionLayoutSystem || {};
+    sys.version = V53_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      NOTE: 'v53 fix is inline at drawConditionBadge43 (in V43 IIFE). This IIFE only bumps the build tag.'
+    }, sys.config || {});
+    sys.stats = Object.assign({ lastError: null }, sys.stats || {});
+
+    state.v53Debug = function() {
+      return {
+        version: V53_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        v52: typeof state.v52Debug === 'function' ? state.v52Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V53_FLOOR_CONDITION_LAYOUT__ = sys; } catch (e) {}
+    state.buildTag = V53_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v53';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 
