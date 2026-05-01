@@ -30641,7 +30641,92 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V46_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v46';
+  // ===================================================================
+  // === v47 — Stale run-flag reset pass ================================
+  // ===================================================================
+  // Several "this run only" flags were set true but never reset on
+  // startGame, so their once-per-event behavior degraded into
+  // once-per-browser-session. Specifically:
+  //
+  // 1. state._v30FinalWhispered — set true the first time the player
+  //    reaches the final exit with 3+ Moonkeys (and also forced true by
+  //    V38 to deliberately suppress redundant whispers during shrine).
+  //    Never reset, so subsequent runs never see the V30 final whisper
+  //    "THE MOONKEYS TURN UNDER THE THRONE" again in this session.
+  //
+  // 2. state._v31FinalMoonkeyWhispered — same pattern, V31's parallel
+  //    whisper "THE THREE MOONKEYS REMEMBER THE FORBIDDEN DOOR".
+  //
+  // 3. state._v43BossMessageQuiet — set when a boss/miniboss begins
+  //    dying. Holds {until: state.time + 3.2}. Since state.time resets
+  //    to 0 on startGame but this object persists, the check
+  //    state.time <= q.until evaluates true at the START of run 2
+  //    (0 <= old until). With q.shown also true from run 1, the boss
+  //    message wrap suppresses non-allowlisted messages for the first
+  //    several minutes of run 2, making the run feel oddly silent.
+  //
+  // Fix: a startGame wrap that clears these three flags.
+  // ===================================================================
+  (function installV47StaleRunFlagReset() {
+    const V47_VERSION = 'qual.future-consequence.2026-05-01.v47';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v47StaleRunFlagResetSystem = state.v47StaleRunFlagResetSystem || {};
+    sys.version = V47_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      RESET_V30_FINAL_WHISPERED: true,
+      RESET_V31_FINAL_MOONKEY_WHISPERED: true,
+      RESET_V43_BOSS_MESSAGE_QUIET: true
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      runStarts: 0,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError47(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    if (typeof startGame === 'function' && !startGame.__v47StaleRunFlagReset) {
+      const baseStartGame47 = startGame;
+      startGame = function() {
+        try {
+          if (sys.config.ENABLED) {
+            if (sys.config.RESET_V30_FINAL_WHISPERED) state._v30FinalWhispered = false;
+            if (sys.config.RESET_V31_FINAL_MOONKEY_WHISPERED) state._v31FinalMoonkeyWhispered = false;
+            if (sys.config.RESET_V43_BOSS_MESSAGE_QUIET) state._v43BossMessageQuiet = null;
+            sys.stats.runStarts += 1;
+          }
+        } catch (e) { recordError47(e); }
+        return baseStartGame47.apply(this, arguments);
+      };
+      startGame.__v47StaleRunFlagReset = true;
+    }
+
+    state.v47Debug = function() {
+      return {
+        version: V47_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        currentFlagState: {
+          _v30FinalWhispered: !!state._v30FinalWhispered,
+          _v31FinalMoonkeyWhispered: !!state._v31FinalMoonkeyWhispered,
+          _v43BossMessageQuiet: state._v43BossMessageQuiet
+            ? { until: state._v43BossMessageQuiet.until, shown: !!state._v43BossMessageQuiet.shown, label: state._v43BossMessageQuiet.label, type: state._v43BossMessageQuiet.type }
+            : null
+        },
+        v46: typeof state.v46Debug === 'function' ? state.v46Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V47_STALE_FLAG_RESET__ = sys; } catch (e) {}
+    state.buildTag = V47_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v47';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 
