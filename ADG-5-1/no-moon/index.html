@@ -30896,7 +30896,180 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V50_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v50';
+  // ===================================================================
+  // === v51 — Boss/mini-boss message staggering =======================
+  // ===================================================================
+  // Long-standing UX bug: when bosses and mini-bosses die, many messages
+  // fire in a 3-5 second window:
+  //   - kill text ("The Warden breaks apart")
+  //   - boss-defeat ceremony stage 1 (~2s after kill)
+  //   - "Bellway open — enter when ready" (~5s after kill)
+  //   - item-proc messages (Black Lotus blooms, Rift recharges, etc.)
+  //   - achievement unlocks
+  //   - Moonkey/Sunkey drop messages
+  //   - V30/V31 final whispers
+  //   - V43's boss-quiet label
+  //
+  // V43 already coalesces messages that match its bossText regex during a
+  // 3.2-second window, but the allowlist (SUNKEY, MOONKEY, BOON MOOTS, etc.)
+  // and various non-bossText messages still pass through. The drawMessages
+  // lane system stacks them vertically, but a 4-message stack is still
+  // unreadable in 1-2 seconds before they fade.
+  //
+  // V51 adds temporal staggering: large messages (size >= 18, the threshold
+  // pushMessage uses for "readable") are queued if another large message
+  // was dispatched within MIN_LARGE_SPACING seconds. The queue is drained
+  // one message per frame, gated by the same spacing. Small messages
+  // (HUD chips, item-proc tiny text) bypass the queue and pass through
+  // immediately.
+  //
+  // Effect: instead of seeing 4-5 messages all on screen at once for the
+  // same 1.5 seconds, the player sees them one at a time, each with its
+  // own readable window.
+  //
+  // Trade-off: messages are slightly delayed from the moment they would
+  // have "naturally" fired. Boss kills feel a beat slower in messaging,
+  // but become readable. Acceptable given the alternative is unreadable.
+  // ===================================================================
+  (function installV51MessageStagger() {
+    const V51_VERSION = 'qual.future-consequence.2026-05-01.v51';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v51MessageStaggerSystem = state.v51MessageStaggerSystem || {};
+    sys.version = V51_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      // Minimum time (in seconds, game-time) between large messages.
+      MIN_LARGE_SPACING: 0.55,
+      // Messages with size >= this are considered "large" and subject to staggering.
+      LARGE_SIZE_THRESHOLD: 18,
+      // Cap on queue length. If full, the oldest queued message is dropped.
+      MAX_QUEUE_LENGTH: 8,
+      // Use game time (state.time) so paused / draft / shrine doesn't tick the queue.
+      USE_GAMETIME: true
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      passedThrough: 0,
+      queued: 0,
+      dispatched: 0,
+      droppedFull: 0,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError51(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    const queue = [];
+    let lastLargeDispatchAt = -1e9;
+
+    function nowSeconds51() {
+      try {
+        if (sys.config.USE_GAMETIME && state && Number.isFinite(Number(state.time))) {
+          return Number(state.time);
+        }
+        if (typeof performance !== 'undefined' && performance.now) {
+          return performance.now() / 1000;
+        }
+      } catch (e) {}
+      return Date.now() / 1000;
+    }
+
+    let basePushMessage51 = null;
+
+    if (typeof pushMessage === 'function' && !pushMessage.__v51MessageStagger) {
+      basePushMessage51 = pushMessage;
+      pushMessage = function(text, color, size, duration, y) {
+        try {
+          if (!sys.config.ENABLED) return basePushMessage51.call(this, text, color, size, duration, y);
+
+          const sizeNum = Number(size);
+          const safeSize = Number.isFinite(sizeNum) ? sizeNum : 26;
+          const isLarge = safeSize >= (Number(sys.config.LARGE_SIZE_THRESHOLD) || 18);
+
+          if (!isLarge) {
+            sys.stats.passedThrough += 1;
+            return basePushMessage51.call(this, text, color, size, duration, y);
+          }
+
+          const now = nowSeconds51();
+          const spacing = Number(sys.config.MIN_LARGE_SPACING) || 0.55;
+
+          if (queue.length === 0 && (now - lastLargeDispatchAt) >= spacing) {
+            lastLargeDispatchAt = now;
+            sys.stats.dispatched += 1;
+            return basePushMessage51.call(this, text, color, size, duration, y);
+          }
+
+          const cap = Math.max(1, Number(sys.config.MAX_QUEUE_LENGTH) || 8);
+          if (queue.length >= cap) {
+            queue.shift();
+            sys.stats.droppedFull += 1;
+          }
+          queue.push({ text, color, size, duration, y, enqueuedAt: now });
+          sys.stats.queued += 1;
+          return undefined;
+        } catch (e) { recordError51(e); }
+        return basePushMessage51.call(this, text, color, size, duration, y);
+      };
+      pushMessage.__v51MessageStagger = true;
+    }
+
+    if (typeof updateMessages === 'function' && !updateMessages.__v51MessageStagger) {
+      const baseUpdateMessages51 = updateMessages;
+      updateMessages = function(dt) {
+        try {
+          if (sys.config.ENABLED && basePushMessage51 && queue.length) {
+            const now = nowSeconds51();
+            const spacing = Number(sys.config.MIN_LARGE_SPACING) || 0.55;
+            // Drain at most one per frame to maintain spacing across multiple frames.
+            // We loop in case spacing has been generous and multiple are due.
+            let drained = 0;
+            while (queue.length > 0 && (now - lastLargeDispatchAt) >= spacing && drained < 1) {
+              const next = queue.shift();
+              lastLargeDispatchAt = now;
+              try { basePushMessage51.call(this, next.text, next.color, next.size, next.duration, next.y); } catch (innerErr) { recordError51(innerErr); }
+              sys.stats.dispatched += 1;
+              drained += 1;
+            }
+          }
+        } catch (e) { recordError51(e); }
+        return baseUpdateMessages51.apply(this, arguments);
+      };
+      updateMessages.__v51MessageStagger = true;
+    }
+
+    // Reset queue on startGame so a death mid-boss-kill doesn't bleed into the next run.
+    if (typeof startGame === 'function' && !startGame.__v51MessageStagger) {
+      const baseStartGame51 = startGame;
+      startGame = function() {
+        try {
+          queue.length = 0;
+          lastLargeDispatchAt = -1e9;
+        } catch (e) { recordError51(e); }
+        return baseStartGame51.apply(this, arguments);
+      };
+      startGame.__v51MessageStagger = true;
+    }
+
+    state.v51Debug = function() {
+      return {
+        version: V51_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        queueLength: queue.length,
+        secondsSinceLastDispatch: Math.max(0, nowSeconds51() - lastLargeDispatchAt),
+        v50: typeof state.v50Debug === 'function' ? state.v50Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V51_MESSAGE_STAGGER__ = sys; } catch (e) {}
+    state.buildTag = V51_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v51';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 
