@@ -2704,7 +2704,7 @@ let hudMenuOpen = false;
     if (!state.save) return;
     state.save.highestBiomeReached = Math.max(state.save.highestBiomeReached || 0, state.stats.deepest || 0);
     state.save.lifetime.kills += state.stats.kills || 0;
-    state.save.lifetime.secrets += state.stats.secrets || 0;
+    // v46: removed double-count of lifetime.secrets — addLifetimeStat('secrets',1,true) in pickupSecret() already increments per pickup, so aggregating state.stats.secrets here counted each secret twice.
     state.save.lifetime.timePlayed += state.runTime || 0;
     if (outcome === 'dead') state.save.lifetime.deaths += 1;
     if (outcome === 'win') state.save.lifetime.wins += 1;
@@ -23010,7 +23010,8 @@ function drawHudBossMiniStats(p, layout) {
             const meta = overlayMeta.textContent || '';
             if (!/Safe Haven renegade/i.test(meta)) overlayMeta.textContent = (meta ? meta + ' • ' : '') + 'Safe Haven renegade ending';
           }
-        } else if (state.overlayMode === 'win' && overlayText && !/Safe Haven/i.test(overlayText.innerHTML || '')) {
+        } else if (state.overlayMode === 'win' && overlayText && !/last door/i.test(overlayText.innerHTML || '')) {
+          // v46: guard regex now checks for the appended sentence's distinctive phrase ("last door"), so this branch is properly idempotent. The old "/Safe Haven/i" check never matched the appended text, so if V32's overlay-apply ever failed this would have appended forever on each refresh.
           overlayText.innerHTML += ' You climbed beyond the tribe\'s last door and proved the warning was not enough to keep you below.';
         }
       } catch (e) { sys.stats.lastError = e && (e.message || String(e)); }
@@ -30490,16 +30491,11 @@ function drawHudBossMiniStats(p, layout) {
       };
       syncActiveRoom.__v45SecretDoorSanity = true;
     }
-    if (typeof updateGame === 'function' && !updateGame.__v45SecretDoorSanity) {
-      const baseUpdateGame45 = updateGame;
-      updateGame = function(dt) {
-        try { sanitizeLevel45(state.level, 'updateGame:before'); } catch (e) { recordError45(e); }
-        const out = baseUpdateGame45.apply(this, arguments);
-        try { sanitizeLevel45(state.level, 'updateGame:after'); } catch (e) { recordError45(e); }
-        return out;
-      };
-      updateGame.__v45SecretDoorSanity = true;
-    }
+    // v46: removed the per-frame updateGame wrap that called sanitizeLevel45 twice every frame.
+    // The generateLevel/syncActiveRoom/startGame/damageObstacle wraps below already cover every
+    // path that creates orphan capsules or hidden seams, so the per-frame pass was redundant
+    // and caused unnecessary GC pressure (fresh Set + object allocation per call). The manual
+    // state.v45SecretDoorAudit() debug helper still works because it calls sanitizeLevel45 directly.
     if (typeof damageObstacle === 'function' && !damageObstacle.__v45SecretDoorSanity) {
       const baseDamageObstacle45 = damageObstacle;
       damageObstacle = function(obstacle, amount) {
@@ -30548,7 +30544,104 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V45_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v45';
+  // ===================================================================
+  // === v46 — Recovery shell exception counter (observability) ========
+  // ===================================================================
+  // The existing recovery shell (recoverFromGameException) catches per-frame
+  // exceptions, logs to console, and shows a throttled "Stabilized" message.
+  // If a real bug throws every frame, the player sees one quick "Stabilized"
+  // and the game pretends to keep running while every frame silently fails.
+  //
+  // v46 adds a consecutive-failure counter so persistent bugs surface a
+  // visible "Run interrupted — please refresh" message after ~0.5 sec of
+  // continuous failures. Resets on any clean updateGame frame.
+  // ===================================================================
+  (function installV46RecoveryShellCounter() {
+    const V46_VERSION = 'qual.future-consequence.2026-05-01.v46';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v46RecoveryShellSystem = state.v46RecoveryShellSystem || {};
+    sys.version = V46_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      ALERT_AFTER_CONSECUTIVE: 30,        // ~0.5 sec at 60 fps
+      ALERT_COOLDOWN_SECONDS: 8,
+      LOG_TO_CONSOLE: true
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      consecutivePhaseFailures: 0,
+      lastPhase: null,
+      alertCount: 0,
+      lastAlertAt: 0,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError46(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    if (typeof recoverFromGameException === 'function' && !recoverFromGameException.__v46Counter) {
+      const baseRecover46 = recoverFromGameException;
+      recoverFromGameException = function(err, phase) {
+        try {
+          if (sys.config.ENABLED) {
+            if (phase === sys.stats.lastPhase) sys.stats.consecutivePhaseFailures += 1;
+            else sys.stats.consecutivePhaseFailures = 1;
+            sys.stats.lastPhase = phase;
+
+            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            const cooldownMs = (Number(sys.config.ALERT_COOLDOWN_SECONDS) || 8) * 1000;
+            const threshold = Number(sys.config.ALERT_AFTER_CONSECUTIVE) || 30;
+            if (sys.stats.consecutivePhaseFailures >= threshold && (now - sys.stats.lastAlertAt) > cooldownMs) {
+              sys.stats.lastAlertAt = now;
+              sys.stats.alertCount += 1;
+              try {
+                if (typeof pushMessage === 'function') {
+                  pushMessage('Run interrupted — please refresh.', '#ffb675', 22, 6.0, 0.32);
+                }
+              } catch (innerPush) { recordError46(innerPush); }
+              if (sys.config.LOG_TO_CONSOLE) {
+                try { console.warn('No Moon: persistent exception in', phase, '— recommend refresh.'); } catch (innerLog) {}
+              }
+            }
+          }
+        } catch (e) { recordError46(e); }
+        return baseRecover46.apply(this, arguments);
+      };
+      recoverFromGameException.__v46Counter = true;
+    }
+
+    if (typeof updateGame === 'function' && !updateGame.__v46Counter) {
+      const baseUpdateGame46 = updateGame;
+      updateGame = function(dt) {
+        const out = baseUpdateGame46.apply(this, arguments);
+        try {
+          if (sys.config.ENABLED && sys.stats.consecutivePhaseFailures > 0) {
+            sys.stats.consecutivePhaseFailures = 0;
+            sys.stats.lastPhase = null;
+          }
+        } catch (e) { recordError46(e); }
+        return out;
+      };
+      updateGame.__v46Counter = true;
+    }
+
+    state.v46Debug = function() {
+      return {
+        version: V46_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        v45: typeof state.v45Debug === 'function' ? state.v45Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V46_RECOVERY_SHELL__ = sys; } catch (e) {}
+    state.buildTag = V46_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v46';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 
