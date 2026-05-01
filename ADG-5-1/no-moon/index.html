@@ -31069,7 +31069,158 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V51_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v51';
+  // ===================================================================
+  // === v52 — Shrine player visibility + Boon Moots capture safety ====
+  // ===================================================================
+  // Long-standing bug in the Moon Shrine room ("Boon Moots" stage):
+  //
+  // 1) The shrine backdrop is drawn over the world at ~94% alpha, hiding
+  //    the player. The existing shrine render adds a subtle white glow
+  //    (alpha 0.18) at the player's position, but the player sprite
+  //    itself is still buried under the backdrop. Players report "I
+  //    can't see my character".
+  //
+  // 2) Boon Moots collection is unreliable. Multiple magnet systems
+  //    (core, V38 long-magnet now disabled, V43 main, V43 supplement)
+  //    all yank the reward toward the player each frame in slightly
+  //    different orders. The core collection check uses pre-magnet d,
+  //    so when the player is moving fast or being shoved, d at the
+  //    check moment can stay above the 45-pixel capture radius even
+  //    though the reward and player are visually overlapping.
+  //
+  //    Eventually V43's stage-transition assist or some other catch-up
+  //    fires capture and the player gets ascended, but it feels random
+  //    — "I walk through them and bounce, then a few seconds later it
+  //    teleports me anyway".
+  //
+  // V52 adds two fixes via render and updateGame wraps:
+  //
+  //   - PLAYER_VISIBLE_DURING_SHRINE: redraws the player sprite ON TOP
+  //     of the shrine backdrop so the character is fully visible during
+  //     fight, breaking, reward, victory, and ascend stages.
+  //
+  //   - AGGRESSIVE_CAPTURE: at the end of every frame, if shrine.stage
+  //     is 'reward' and reward exists and is uncaptured and the player
+  //     is within AGGRESSIVE_CAPTURE_RADIUS pixels, force capture by
+  //     setting reward.captured = true and stage = 'victory'. The V43
+  //     "BOON MOOTS TAKEN" confirmation still fires on the stage
+  //     transition. This is in addition to the core check, not a
+  //     replacement — generous fallback so the player never gets stuck.
+  //
+  // Trade-off: AGGRESSIVE_CAPTURE_RADIUS is intentionally larger than
+  // the core's 45-pixel radius. If the player just brushes near the
+  // reward they collect it. That's the desired behavior for an emotional
+  // payoff moment — no fiddly precision required.
+  // ===================================================================
+  (function installV52ShrinePlayerVisibilityAndCapture() {
+    const V52_VERSION = 'qual.future-consequence.2026-05-01.v52';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v52ShrineFixSystem = state.v52ShrineFixSystem || {};
+    sys.version = V52_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      PLAYER_VISIBLE_DURING_SHRINE: true,
+      AGGRESSIVE_CAPTURE: true,
+      AGGRESSIVE_CAPTURE_RADIUS: 80
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      playerRedraws: 0,
+      aggressiveCaptures: 0,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError52(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    if (typeof render === 'function' && !render.__v52ShrineFix) {
+      const baseRender52 = render;
+      render = function() {
+        const result = baseRender52.apply(this, arguments);
+        try {
+          if (sys.config.ENABLED && sys.config.PLAYER_VISIBLE_DURING_SHRINE
+              && state.shrine && state.shrine.active
+              && state.player && state.mode !== 'dead'
+              && typeof drawPlayer === 'function'
+              && typeof ctx !== 'undefined' && ctx) {
+            ctx.save();
+            const cam = state.camera || { x: 0, y: 0 };
+            const tx = -cam.x + (typeof playViewCenterX === 'function' ? playViewCenterX() : (typeof W !== 'undefined' ? W : 1080) * 0.5);
+            const ty = -cam.y + (typeof playViewCenterY === 'function' ? playViewCenterY() : (typeof H !== 'undefined' ? H : 780) * 0.5);
+            ctx.translate(tx, ty);
+            drawPlayer(state.player);
+            sys.stats.playerRedraws += 1;
+            ctx.restore();
+          }
+        } catch (e) { recordError52(e); }
+        return result;
+      };
+      render.__v52ShrineFix = true;
+    }
+
+    if (typeof updateGame === 'function' && !updateGame.__v52ShrineFix) {
+      const baseUpdateGame52 = updateGame;
+      updateGame = function(dt) {
+        const result = baseUpdateGame52.apply(this, arguments);
+        try {
+          if (!sys.config.ENABLED || !sys.config.AGGRESSIVE_CAPTURE) return result;
+          const s = state.shrine;
+          if (!s || !s.active || s.stage !== 'reward') return result;
+          const r = s.reward;
+          if (!r || r.captured) return result;
+          const p = state.player;
+          if (!p) return result;
+          const dx = p.x - r.x;
+          const dy = p.y - r.y;
+          const d = Math.hypot(dx, dy);
+          const radius = Number(sys.config.AGGRESSIVE_CAPTURE_RADIUS) || 80;
+          if (d < radius) {
+            r.captured = true;
+            r.x = p.x;
+            r.y = p.y;
+            s.stage = 'victory';
+            s.timer = 0;
+            s.ascend = 0;
+            try { if (typeof pushMessage === 'function') pushMessage('BOON MOOTS', '#ffffff', 72, 6.5, 0.62); } catch (innerErr) { recordError52(innerErr); }
+            try { if (typeof pushMessage === 'function') pushMessage('the moon is yours', '#dfe4ff', 22, 5.5, 0.36); } catch (innerErr) { recordError52(innerErr); }
+            try {
+              if (typeof spawnRing === 'function') {
+                spawnRing(p.x, p.y, '#ffffff', 100);
+                spawnRing(p.x, p.y, '#dfe4ff', 180);
+                spawnRing(p.x, p.y, '#a4c0ff', 280);
+              }
+            } catch (innerErr) { recordError52(innerErr); }
+            try { if (typeof shake === 'function') shake(8); } catch (innerErr) { recordError52(innerErr); }
+            try { if (typeof startSlowMo === 'function') startSlowMo(1.6, 0.20); } catch (innerErr) { recordError52(innerErr); }
+            sys.stats.aggressiveCaptures += 1;
+          }
+        } catch (e) { recordError52(e); }
+        return result;
+      };
+      updateGame.__v52ShrineFix = true;
+    }
+
+    state.v52Debug = function() {
+      const s = state.shrine || null;
+      return {
+        version: V52_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        shrineActive: !!(s && s.active),
+        shrineStage: s ? s.stage : null,
+        rewardCaptured: !!(s && s.reward && s.reward.captured),
+        v51: typeof state.v51Debug === 'function' ? state.v51Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V52_SHRINE_FIX__ = sys; } catch (e) {}
+    state.buildTag = V52_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v52';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 
