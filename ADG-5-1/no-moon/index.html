@@ -31280,7 +31280,151 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V53_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v53';
+  // ===================================================================
+  // === v54 — Tribal whisper layer ====================================
+  // ===================================================================
+  // Pure flavor layer. At the moment of death/win/return, append a
+  // single line drawn from the run's stats: "what the tribe would
+  // whisper about you."
+  //
+  //   The Sun-Owed         — beat the Sun route
+  //   The Debt-Taken       — finished with peak Moon Debt >= 8
+  //   The False-Lit        — broke many cursed/false idols
+  //   The Star-Eaten       — collected many Moon Splinters
+  //   The Wall-Listener    — found many secret reliquaries
+  //   The Lantern-Bound    — won carrying a Lantern Pup companion
+  //   The Moonless Witness — won the base route without 3 Moonkeys
+  //   The Breach-Walker    — opened many breach rooms
+  //   The Threshold-Crosser— default
+  //
+  // All triggers map to existing run-stats fields. No new tracking
+  // required. Wraps updateOverlay AND showOverlay outermost so the
+  // line survives V31/V32/V33/V39 overlay copy. Idempotency check
+  // prevents double-append within the same content.
+  // ===================================================================
+  (function installV54TribalWhispers() {
+    const V54_VERSION = 'qual.future-consequence.2026-05-01.v54';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v54TribalWhisperSystem = state.v54TribalWhisperSystem || {};
+    sys.version = V54_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      DEBT_THRESHOLD: 8,
+      CURSED_THRESHOLD: 3,
+      SPLINTER_THRESHOLD: 12,
+      RELIQUARY_THRESHOLD: 4,
+      BREACH_THRESHOLD: 3
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      lastWhisper: null,
+      appendsThisRun: 0,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError54(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    function pickTribalWhisper54() {
+      try {
+        const rs = state.runStats || {};
+        const p = state.player || null;
+        const moonkeysReady = !!state.moonkeyEndingUnlocked;
+        const sunPathDone = !!state._v39SunPathCompletedThisWin;
+        const peakDebt = Number(rs.moonDebtPeak) || 0;
+        const cursed = Number(rs.cursedBargainsTaken) || 0;
+        const reliquaries = Number(rs.reliquariesFound) || 0;
+        const splinters = (p && Number(p.moonSplinterTotal)) || 0;
+        const hasLanternPup = !!(p && p.modules && (p.modules.scavengerDrone || 0) > 0);
+        const breaches = Number(rs.breachRoomsOpened) || 0;
+        const isWin = state.overlayMode === 'win';
+
+        if (sunPathDone) return 'The Sun-Owed';
+        if (peakDebt >= (Number(sys.config.DEBT_THRESHOLD) || 8)) return 'The Debt-Taken';
+        if (cursed >= (Number(sys.config.CURSED_THRESHOLD) || 3)) return 'The False-Lit';
+        if (splinters >= (Number(sys.config.SPLINTER_THRESHOLD) || 12)) return 'The Star-Eaten';
+        if (reliquaries >= (Number(sys.config.RELIQUARY_THRESHOLD) || 4)) return 'The Wall-Listener';
+        if (hasLanternPup && isWin) return 'The Lantern-Bound';
+        if (isWin && !moonkeysReady) return 'The Moonless Witness';
+        if (breaches >= (Number(sys.config.BREACH_THRESHOLD) || 3)) return 'The Breach-Walker';
+        return 'The Threshold-Crosser';
+      } catch (e) { recordError54(e); return null; }
+    }
+
+    function whisperLine54(whisper) {
+      if (state.overlayMode === 'win' && state._v39SunPathCompletedThisWin) {
+        return 'The Cold Sister knows you as <strong>' + whisper + '</strong>.';
+      }
+      if (state.overlayMode === 'win') {
+        return 'Safe Haven calls you <strong>' + whisper + '</strong>.';
+      }
+      return 'The wall remembers you as <strong>' + whisper + '</strong>.';
+    }
+
+    function appendWhisperToOverlay54() {
+      if (!sys.config.ENABLED) return;
+      if (state.overlayMode !== 'win' && state.overlayMode !== 'dead') return;
+      if (typeof overlayText === 'undefined' || !overlayText) return;
+      const whisper = pickTribalWhisper54();
+      if (!whisper) return;
+      sys.stats.lastWhisper = whisper;
+      try {
+        const html = overlayText.innerHTML || '';
+        if (html.indexOf(whisper) >= 0) return;
+        overlayText.innerHTML = html + '<br><br>' + whisperLine54(whisper);
+        sys.stats.appendsThisRun += 1;
+      } catch (e) { recordError54(e); }
+    }
+
+    if (typeof updateOverlay === 'function' && !updateOverlay.__v54TribalWhispers) {
+      const baseUpdateOverlay54 = updateOverlay;
+      updateOverlay = function() {
+        const result = baseUpdateOverlay54.apply(this, arguments);
+        try { appendWhisperToOverlay54(); } catch (e) { recordError54(e); }
+        return result;
+      };
+      updateOverlay.__v54TribalWhispers = true;
+    }
+
+    if (typeof showOverlay === 'function' && !showOverlay.__v54TribalWhispers) {
+      const baseShowOverlay54 = showOverlay;
+      showOverlay = function(mode) {
+        const result = baseShowOverlay54.apply(this, arguments);
+        try { appendWhisperToOverlay54(); } catch (e) { recordError54(e); }
+        return result;
+      };
+      showOverlay.__v54TribalWhispers = true;
+    }
+
+    // Reset run-counter on startGame (lastWhisper persists across runs as info; appendsThisRun resets)
+    if (typeof startGame === 'function' && !startGame.__v54TribalWhispers) {
+      const baseStartGame54 = startGame;
+      startGame = function() {
+        sys.stats.appendsThisRun = 0;
+        return baseStartGame54.apply(this, arguments);
+      };
+      startGame.__v54TribalWhispers = true;
+    }
+
+    state.v54Debug = function() {
+      return {
+        version: V54_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        currentMode: state.overlayMode,
+        wouldWhisper: pickTribalWhisper54(),
+        v53: typeof state.v53Debug === 'function' ? state.v53Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V54_TRIBAL_WHISPERS__ = sys; } catch (e) {}
+    state.buildTag = V54_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v54';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-future-consequence-v53';
+const CACHE_NAME = 'no-moon-future-consequence-v54';
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', (event) => {
