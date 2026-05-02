@@ -31424,7 +31424,184 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V54_VERSION;
   })();
 
-  state.buildTag = 'qual.future-consequence.2026-05-01.v54';
+  // ===================================================================
+  // === v55 — First build transformation: Little Saint Engine =========
+  // ===================================================================
+  // Existing build identity at line ~14808 already detects "Little
+  // Saint Engine" when the player has Lantern Pup (scavengerDrone) +
+  // Siphon Vane + Aegis Lattice. v55 makes that detection have actual
+  // meaning:
+  //
+  //   Mechanical bonus:
+  //     When the player's guard reknits to full (the 10-second timer),
+  //     each active Lantern Pup fires a small saint-burst — 3 player
+  //     bullets in a tight ring, modest damage scaled off player.damage.
+  //
+  //   Visual layer:
+  //     A thin, faint orbiting crown above the player's head whenever
+  //     the transformation is active. 5 dots, slow rotation, alpha 0.55.
+  //     Visible during fight; faint enough to not intrude.
+  //
+  // Both gate on the same 3-item trigger. Drop any one item and the
+  // transformation goes inactive; pick it back up and it reactivates.
+  //
+  // This is a proof of concept. If it lands, future passes can add
+  // more transformations (Murder Weather, Glass Lightning Heresy,
+  // etc.) using the same scaffolding.
+  // ===================================================================
+  (function installV55LittleSaintEngine() {
+    const V55_VERSION = 'qual.future-consequence.2026-05-01.v55';
+    if (typeof state === 'undefined' || !state) return;
+    try { window.state = state; } catch (e) {}
+
+    const sys = state.v55BuildTransformations = state.v55BuildTransformations || {};
+    sys.version = V55_VERSION;
+    sys.config = Object.assign({
+      ENABLED: true,
+      LITTLE_SAINT_ENGINE: true,
+      SAINT_BURST_PER_PUP: 3,
+      SAINT_BURST_DAMAGE_MULT: 0.45,
+      SAINT_BURST_BULLET_LIFE: 0.55,
+      SAINT_BURST_BULLET_SPEED: 540,
+      CROWN_ALPHA: 0.55,
+      CROWN_DOTS: 5
+    }, sys.config || {});
+    sys.stats = Object.assign({
+      saintBursts: 0,
+      transformActiveFrames: 0,
+      lastError: null
+    }, sys.stats || {});
+
+    function recordError55(e) {
+      sys.stats.lastError = e && (e.message || String(e)) || null;
+    }
+
+    function isLittleSaintEngineActive(p) {
+      if (!sys.config.ENABLED || !sys.config.LITTLE_SAINT_ENGINE) return false;
+      if (!p || !p.modules) return false;
+      return (p.modules.scavengerDrone || 0) >= 1
+          && (p.modules.siphonVane || 0) >= 1
+          && (p.modules.aegisLattice || 0) >= 1;
+    }
+
+    function fireSaintBurst55(p) {
+      if (!p || typeof createPlayerBullet !== 'function') return;
+      const pups = (state.drones && state.drones.length) ? state.drones : [{ x: p.x, y: p.y }];
+      const perPup = Math.max(1, Number(sys.config.SAINT_BURST_PER_PUP) || 3);
+      const damage = (Number(p.damage) || 1) * (Number(sys.config.SAINT_BURST_DAMAGE_MULT) || 0.45);
+      const life = Number(sys.config.SAINT_BURST_BULLET_LIFE) || 0.55;
+      const speed = Number(sys.config.SAINT_BURST_BULLET_SPEED) || 540;
+      for (const pup of pups) {
+        const ox = (pup && Number.isFinite(pup.x)) ? pup.x : p.x;
+        const oy = (pup && Number.isFinite(pup.y)) ? pup.y : p.y;
+        for (let i = 0; i < perPup; i++) {
+          const a = (i / perPup) * Math.PI * 2 + (state.time || 0) * 0.5;
+          try {
+            createPlayerBullet({
+              x: ox, y: oy,
+              vx: Math.cos(a) * speed,
+              vy: Math.sin(a) * speed,
+              r: 3.6, life, damage,
+              color: '#fff3c4'
+            }, { source: 'saintBurst', skipAddons: true, skipEcho: true, gen: 1 });
+          } catch (e) { recordError55(e); }
+        }
+      }
+      sys.stats.saintBursts += 1;
+      try { if (typeof spawnRing === 'function') spawnRing(p.x, p.y, '#fff3c4', 56); } catch (e) {}
+      try {
+        if (typeof playToneBurst === 'function') {
+          playToneBurst({ type: 'sine', startFreq: 660, endFreq: 990, duration: 0.32, gain: 0.045, filterFreq: 2400 });
+        }
+      } catch (e) {}
+    }
+
+    let lastShield55 = 0;
+    let lastShieldMax55 = 0;
+
+    if (typeof updateGame === 'function' && !updateGame.__v55LittleSaintEngine) {
+      const baseUpdateGame55 = updateGame;
+      updateGame = function(dt) {
+        const result = baseUpdateGame55.apply(this, arguments);
+        try {
+          const p = state.player;
+          if (sys.config.ENABLED && p) {
+            const active = isLittleSaintEngineActive(p);
+            p._v55LittleSaintEngine = active;
+            if (active) sys.stats.transformActiveFrames += 1;
+            const cur = Number(p.shield) || 0;
+            const max = Number(p.shieldMax) || 0;
+            if (active && lastShield55 < lastShieldMax55 && cur >= max && max > 0) {
+              fireSaintBurst55(p);
+            }
+            lastShield55 = cur;
+            lastShieldMax55 = max;
+          }
+        } catch (e) { recordError55(e); }
+        return result;
+      };
+      updateGame.__v55LittleSaintEngine = true;
+    }
+
+    if (typeof drawPlayer === 'function' && !drawPlayer.__v55LittleSaintEngine) {
+      const baseDrawPlayer55 = drawPlayer;
+      drawPlayer = function(player) {
+        const result = baseDrawPlayer55.apply(this, arguments);
+        try {
+          if (player && player._v55LittleSaintEngine && typeof ctx !== 'undefined' && ctx) {
+            ctx.save();
+            ctx.translate(player.x, player.y - (player.r || 17) * 1.6);
+            const dots = Math.max(3, Math.min(8, Number(sys.config.CROWN_DOTS) || 5));
+            const crownR = (player.r || 17) * 1.05;
+            const t = (state.time || 0) * 0.6;
+            ctx.globalAlpha = Number(sys.config.CROWN_ALPHA) || 0.55;
+            ctx.fillStyle = '#fff3c4';
+            for (let i = 0; i < dots; i++) {
+              const a = (i / dots) * Math.PI * 2 + t;
+              const px = Math.cos(a) * crownR;
+              const py = Math.sin(a) * crownR * 0.4;
+              ctx.beginPath();
+              ctx.arc(px, py, 1.6 + Math.sin(t * 2 + i) * 0.4, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+        } catch (e) { recordError55(e); }
+        return result;
+      };
+      drawPlayer.__v55LittleSaintEngine = true;
+    }
+
+    // Reset reknit tracking on startGame
+    if (typeof startGame === 'function' && !startGame.__v55LittleSaintEngine) {
+      const baseStartGame55 = startGame;
+      startGame = function() {
+        lastShield55 = 0;
+        lastShieldMax55 = 0;
+        return baseStartGame55.apply(this, arguments);
+      };
+      startGame.__v55LittleSaintEngine = true;
+    }
+
+    state.v55Debug = function() {
+      const p = state.player || null;
+      return {
+        version: V55_VERSION,
+        buildTag: state.buildTag,
+        config: Object.assign({}, sys.config),
+        stats: Object.assign({}, sys.stats),
+        littleSaintEngineActive: !!(p && p._v55LittleSaintEngine),
+        playerShield: p ? p.shield : null,
+        playerShieldMax: p ? p.shieldMax : null,
+        v54: typeof state.v54Debug === 'function' ? state.v54Debug() : null
+      };
+    };
+
+    try { if (typeof window !== 'undefined') window.__NO_MOON_V55_BUILD_TRANSFORMATIONS__ = sys; } catch (e) {}
+    state.buildTag = V55_VERSION;
+  })();
+
+  state.buildTag = 'qual.future-consequence.2026-05-01.v55';
   try { const tagEl = document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (e) {}
   renderCodexStats();
 
