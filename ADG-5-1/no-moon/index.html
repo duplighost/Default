@@ -46013,6 +46013,1341 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v80 — Drowned Sky Stage + Phase 3 + Safe Haven Cold Lantern ===
+  // ===================================================================
+  // Expands v79's three-room sketch into a real stage:
+  //   - 8-9 procedurally-varied rooms in a branching layout
+  //   - 2 new enemies (Eclipse Manta = beacon occluder; Gravity Stone = puller)
+  //   - Drowned Sun gets a 3rd phase at low HP
+  //   - Safe Haven gets a persistent Cold Lantern shrine after first clear
+  //
+  // v80's crater-touch intercept runs PRE-base, beats v79's intercept in
+  // the same frame, and sets state._v79InDrownedSky so v79 stays out.
+  // v80 spawns its own boss (typeId 'v80DrownedSun') so v79's 2-phase
+  // tick doesn't fight v80's 3-phase tick.
+  // ===================================================================
+  (function installV80DrownedSkyStage() {
+    const V80_VERSION = 'qual.drowned-sky-stage-eclipse-trophy.2026-05-14.v80';
+    const CACHE80 = 'no-moon-drowned-sky-stage-eclipse-trophy-v80';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v80DrownedSkyStage && state.v80DrownedSkyStage.installed) return;
+
+    const V80_NAMES = {
+      bossDisplay: 'The Drowned Sun',
+      bossBar: 'THE DROWNED SUN',
+      trophyShrine: 'Cold Lantern',
+      stageHint: 'THE WELL OPENS DEEPER'
+    };
+
+    const sys = state.v80DrownedSkyStage = {
+      installed: true,
+      version: V80_VERSION,
+      cacheExpected: CACHE80,
+      names: V80_NAMES,
+      stats: {
+        stageInstalls: 0,
+        roomsBuilt: 0,
+        enemiesSpawned: 0,
+        bossSpawned: 0,
+        bossPhase2: 0,
+        bossPhase3: 0,
+        bossDefeated: 0,
+        coldLanternTouched: 0,
+        winsRecorded: 0,
+        safeHavenTrophyFrames: 0,
+        lastError: null
+      }
+    };
+
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    const SAVE80 = (typeof SAVE_KEY !== 'undefined' && SAVE_KEY) ? SAVE_KEY : 'noMoonSave_v1';
+    const MIRROR80 = 'noMoonProgress_v68';
+    const TAU80 = (typeof TAU !== 'undefined') ? TAU : Math.PI * 2;
+
+    function log80(e, where) {
+      const msg = (where || 'v80') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v80]', msg, e); } catch (_) {}
+    }
+    function tag80() { try { state.buildTag = V80_VERSION; } catch (_) {} }
+    function rgba80(hex, a) {
+      try { if (typeof rgba === 'function') return rgba(hex, a); } catch (_) {}
+      let h = String(hex || '#fff').replace('#', '');
+      if (h.length === 3) h = h.split('').map(c => c + c).join('');
+      const n = parseInt(h, 16);
+      if (!Number.isFinite(n)) return 'rgba(255,255,255,' + a + ')';
+      return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+
+    // -----------------------------------------------------------------
+    // New enemy types
+    // -----------------------------------------------------------------
+    function registerEnemies80() {
+      try {
+        if (typeof ENEMY_TYPES === 'undefined' || !ENEMY_TYPES) return;
+        if (!ENEMY_TYPES.v80EclipseManta) {
+          ENEMY_TYPES.v80EclipseManta = { display: 'Eclipse Manta', cost: 8, r: 36, hp: 10, speed: 50, color: '#3a1a4a', wake: 9999, behavior: 'v80EclipseManta', boss: false };
+        }
+        if (!ENEMY_TYPES.v80GravityStone) {
+          ENEMY_TYPES.v80GravityStone = { display: 'Gravity Stone', cost: 6, r: 22, hp: 8, speed: 0, color: '#1a0e2a', wake: 9999, behavior: 'v80GravityStone', boss: false };
+        }
+        if (!ENEMY_TYPES.v80DrownedSun) {
+          ENEMY_TYPES.v80DrownedSun = { display: V80_NAMES.bossDisplay, cost: 99, r: 64, hp: 220, speed: 70, color: '#5a7bff', wake: 9999, behavior: 'v80DrownedSun', boss: true };
+        }
+      } catch (e) { log80(e, 'registerEnemies'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Backgrounds — varied per room kind
+    // -----------------------------------------------------------------
+    function makeStageBackground80(room, kind) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = room.width; c.height = room.height;
+        const g = c.getContext('2d');
+        const w = room.width, h = room.height;
+        const grad = g.createLinearGradient(0, 0, 0, h);
+        if (kind === 'boss') {
+          grad.addColorStop(0, '#000005');
+          grad.addColorStop(0.45, '#000002');
+          grad.addColorStop(1, '#000000');
+        } else if (kind === 'fork') {
+          grad.addColorStop(0, '#020414');
+          grad.addColorStop(0.6, '#000008');
+          grad.addColorStop(1, '#000003');
+        } else {
+          grad.addColorStop(0, '#01030f');
+          grad.addColorStop(0.55, '#000008');
+          grad.addColorStop(1, '#000003');
+        }
+        g.fillStyle = grad; g.fillRect(0, 0, w, h);
+        // Star density varies with kind
+        const starCount = kind === 'boss' ? 1200 : kind === 'open' ? 1100 : 880;
+        for (let i = 0; i < starCount; i++) {
+          const x = Math.random() * w;
+          const y = Math.random() * h;
+          const bright = Math.random() < 0.12;
+          const r = bright ? 0.9 + Math.random() * 1.6 : 0.4 + Math.random() * 0.9;
+          g.fillStyle = bright
+            ? rgba80('#ffffff', 0.18 + Math.random() * 0.28)
+            : rgba80('#bde7ff', 0.05 + Math.random() * 0.13);
+          g.beginPath(); g.arc(x, y, r, 0, TAU80); g.fill();
+        }
+        // Nebula tint by kind
+        const nebColors = kind === 'boss' ? ['#5a7bff', '#3a1a8a']
+          : kind === 'spine' ? ['#7a5aff', '#3a2a8a']
+          : kind === 'ring' ? ['#bde7ff', '#5a4aaa']
+          : kind === 'fork' ? ['#a89bff', '#5a4abb']
+          : ['#7fb6ff', '#5a4abb'];
+        const neb = g.createRadialGradient(w * 0.5, h * 0.55, 40, w * 0.5, h * 0.55, Math.max(w, h) * 0.62);
+        neb.addColorStop(0, rgba80(nebColors[0], kind === 'boss' ? 0.10 : 0.14));
+        neb.addColorStop(0.4, rgba80(nebColors[1], 0.05));
+        neb.addColorStop(1, rgba80('#000000', 0));
+        g.fillStyle = neb; g.fillRect(0, 0, w, h);
+        // Distant rails / ferry glyph hint
+        g.strokeStyle = rgba80('#a89bff', 0.06);
+        g.lineWidth = 2;
+        const railCount = kind === 'spine' ? 8 : 5;
+        for (let i = 0; i < railCount; i++) {
+          const y = h * (0.18 + i * (0.66 / railCount));
+          g.beginPath();
+          for (let x = -40; x < w + 80; x += 60) {
+            const yy = y + Math.sin(x * 0.012 + i) * 22;
+            if (x < -30) g.moveTo(x, yy); else g.lineTo(x, yy);
+          }
+          g.stroke();
+        }
+        if (kind === 'boss') {
+          const well = g.createRadialGradient(w * 0.5, h * 0.48, 12, w * 0.5, h * 0.48, Math.min(w, h) * 0.50);
+          well.addColorStop(0, rgba80('#000000', 0.82));
+          well.addColorStop(0.45, rgba80('#02030c', 0.42));
+          well.addColorStop(1, rgba80('#02030c', 0));
+          g.fillStyle = well; g.fillRect(0, 0, w, h);
+        } else if (kind === 'ring') {
+          // Faint ring on the floor
+          g.strokeStyle = rgba80('#bde7ff', 0.12);
+          g.lineWidth = 3;
+          g.beginPath();
+          g.ellipse(w * 0.5, h * 0.5, Math.min(w, h) * 0.30, Math.min(w, h) * 0.16, 0, 0, TAU80);
+          g.stroke();
+        } else if (kind === 'fork') {
+          // Two faint paths converging
+          g.strokeStyle = rgba80('#a89bff', 0.10);
+          g.lineWidth = 2;
+          g.beginPath();
+          g.moveTo(w * 0.2, h * 0.85);
+          g.bezierCurveTo(w * 0.3, h * 0.5, w * 0.4, h * 0.3, w * 0.5, h * 0.18);
+          g.stroke();
+          g.beginPath();
+          g.moveTo(w * 0.8, h * 0.85);
+          g.bezierCurveTo(w * 0.7, h * 0.5, w * 0.6, h * 0.3, w * 0.5, h * 0.18);
+          g.stroke();
+        }
+        return c;
+      } catch (e) { log80(e, 'makeBackground'); return null; }
+    }
+
+    function makeBeacons80(room, count) {
+      const beacons = [];
+      const w = room.width, h = room.height, wall = room.wall || 80;
+      for (let i = 0; i < count; i++) {
+        beacons.push({
+          x: wall + 90 + Math.random() * (w - wall * 2 - 180),
+          y: wall + 90 + Math.random() * (h - wall * 2 - 180),
+          r: 26 + Math.random() * 10,
+          phase: Math.random() * TAU80,
+          tint: Math.random() < 0.5 ? '#bde7ff' : '#a89bff'
+        });
+      }
+      return beacons;
+    }
+    function drawBeacon80(b, t, occlude) {
+      try {
+        const pulse = 0.55 + 0.45 * Math.sin(t * 1.2 + b.phase);
+        const a = (1 - Math.max(0, Math.min(1, N(occlude))));
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 1.6);
+        grad.addColorStop(0, rgba80(b.tint, 0.34 * pulse * a));
+        grad.addColorStop(0.45, rgba80(b.tint, 0.10 * pulse * a));
+        grad.addColorStop(1, rgba80('#000000', 0));
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.6, 0, TAU80); ctx.fill();
+        ctx.strokeStyle = rgba80(b.tint, 0.62 * a);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.42, 0, TAU80); ctx.stroke();
+        ctx.fillStyle = rgba80('#ffffff', 0.42 * pulse * a);
+        ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, TAU80); ctx.fill();
+        ctx.restore();
+      } catch (e) { log80(e, 'drawBeacon'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Room generator — kind drives layout, beacon count, enemy palette
+    // -----------------------------------------------------------------
+    function makeStageRoom80(level, baseId, seq, kind, opts) {
+      opts = opts || {};
+      const sizeByKind = {
+        entry:    { w: 1100, h: 820 },
+        spine:    { w: 1320, h: 780 },
+        open:     { w: 1280, h: 940 },
+        ring:     { w: 1180, h: 880 },
+        fork:     { w: 1240, h: 900 },
+        preboss:  { w: 1160, h: 880 },
+        boss:     { w: 1320, h: 940 },
+        secret:   { w:  900, h: 740 }
+      };
+      const sz = sizeByKind[kind] || sizeByKind.spine;
+      const w = sz.w + (Math.random() - 0.5) * 60;
+      const h = sz.h + (Math.random() - 0.5) * 60;
+      const room = {
+        id: baseId,
+        kind: kind === 'boss' ? 'exit' : 'normal',
+        depth: 199 + seq,
+        gx: 80 + seq, gy: 99,
+        entered: false,
+        explored: false,
+        hasBoss: false,
+        hasBossArena: false,
+        index: level.index,
+        biome: { id: 'v80DrownedSky', name: 'The Drowned Sky', top: '#01030f', bottom: '#000005', accent: '#bde7ff', accent2: '#a89bff', shot: '#dff6ff' },
+        routeTheme: { family: 'v80DrownedSky', features: ['stars'] },
+        featureSet: ['stars'],
+        layoutMode: kind === 'ring' ? 'ring' : kind === 'spine' ? 'lanesH' : 'spine',
+        ambientMode: 'orbs',
+        obstacleStyle: 'archivePillar',
+        width: w, height: h, wall: 80,
+        obstacles: [],
+        ambient: [],
+        background: null,
+        veils: [],
+        annexes: [],
+        hazards: [],
+        pickups: [],
+        traps: [],
+        enemies: [],
+        layoutPhase: Math.random() * TAU80,
+        ringCenter: { x: w * 0.5, y: h * 0.5 },
+        pockets: [],
+        obstaclePalette: ['archivePillar'],
+        wallPalette: [],
+        spawn: { x: w * 0.5, y: h * 0.78, r: 60 },
+        exit: { x: w * 0.5, y: h * 0.5, r: kind === 'boss' ? 0 : 0, active: false },
+        secret: { x: -9999, y: -9999, r: 0, hidden: true, revealed: false, collected: false, hint: false, rewardId: 'repair' },
+        cleared: false,
+        doorSize: 154,
+        doors: [],
+        breakableObstacleId: null,
+        showSpawnGlyph: false,
+        showExitGlyph: false,
+        _v80DrownedSky: true,
+        _v80RoomSeq: seq,
+        _v80RoomKind: kind,
+        _v80Label: opts.label || (kind === 'boss' ? 'The Drowned Well' : (kind === 'secret' ? 'Cold Hollow' : 'Drowned Sky'))
+      };
+      // Obstacles based on kind
+      if (kind === 'spine') {
+        for (let i = 0; i < 4; i++) {
+          room.obstacles.push({ x: w * (0.25 + i * 0.16), y: h * (i % 2 ? 0.36 : 0.62), r: 28 + Math.random() * 14, seed: Math.random() * 9999, variant: Math.floor(Math.random() * 3), style: 'archivePillar', shape: 'circle', breakable: false, hp: 0, maxHp: 0, hiddenItemId: null });
+        }
+      } else if (kind === 'open') {
+        for (let i = 0; i < 5; i++) {
+          room.obstacles.push({ x: w * (0.22 + (i % 3) * 0.28) + (Math.random() - 0.5) * 60, y: h * (0.30 + Math.floor(i / 3) * 0.30) + (Math.random() - 0.5) * 50, r: 28 + Math.random() * 18, seed: Math.random() * 9999, variant: Math.floor(Math.random() * 3), style: 'archivePillar', shape: 'circle', breakable: false, hp: 0, maxHp: 0, hiddenItemId: null });
+        }
+      } else if (kind === 'ring') {
+        const cx = w * 0.5, cy = h * 0.5;
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * TAU80;
+          room.obstacles.push({ x: cx + Math.cos(a) * w * 0.30, y: cy + Math.sin(a) * h * 0.30, r: 26 + Math.random() * 10, seed: Math.random() * 9999, variant: Math.floor(Math.random() * 3), style: 'archivePillar', shape: 'circle', breakable: false, hp: 0, maxHp: 0, hiddenItemId: null });
+        }
+      } else if (kind === 'fork') {
+        for (let i = 0; i < 3; i++) {
+          room.obstacles.push({ x: w * (0.34 + i * 0.16), y: h * 0.55, r: 30 + Math.random() * 12, seed: Math.random() * 9999, variant: Math.floor(Math.random() * 3), style: 'archivePillar', shape: 'circle', breakable: false, hp: 0, maxHp: 0, hiddenItemId: null });
+        }
+      } else if (kind === 'preboss') {
+        for (let i = 0; i < 2; i++) {
+          room.obstacles.push({ x: w * (0.35 + i * 0.30), y: h * 0.40, r: 32, seed: Math.random() * 9999, variant: i, style: 'archivePillar', shape: 'circle', breakable: false, hp: 0, maxHp: 0, hiddenItemId: null });
+        }
+      }
+      // Drifting cold-tide particles
+      const ambientCount = kind === 'boss' ? 60 : kind === 'open' ? 48 : 36;
+      for (let i = 0; i < ambientCount; i++) {
+        room.ambient.push({
+          x: Math.random() * w, y: Math.random() * h,
+          r: 1.0 + Math.random() * 3.4,
+          alpha: 0.06 + Math.random() * 0.22,
+          vx: (Math.random() - 0.5) * 18,
+          vy: 8 + Math.random() * 28,
+          phase: Math.random() * TAU80,
+          rot: Math.random() * TAU80,
+          spin: (Math.random() - 0.5) * 0.6,
+          tint: Math.random() < 0.5 ? '#bde7ff' : '#a89bff'
+        });
+      }
+      const beaconCountByKind = { entry: 3, spine: 3, open: 5, ring: 4, fork: 4, preboss: 3, boss: 4, secret: 2 };
+      room._v80Beacons = makeBeacons80(room, beaconCountByKind[kind] || 3);
+      room.background = makeStageBackground80(room, kind);
+      return room;
+    }
+
+    // -----------------------------------------------------------------
+    // Enemy palette per room — variety
+    // -----------------------------------------------------------------
+    function enemyPaletteForKind80(kind, seq) {
+      // Available pools: v79Orbiter, v79WakeComet, v80EclipseManta, v80GravityStone
+      if (kind === 'entry')   return ['v79Orbiter', 'v79Orbiter'];
+      if (kind === 'spine')   return ['v79Orbiter', 'v79WakeComet', 'v79Orbiter'];
+      if (kind === 'open')    return ['v79Orbiter', 'v79WakeComet', 'v79WakeComet', 'v80GravityStone'];
+      if (kind === 'ring')    return ['v79Orbiter', 'v79Orbiter', 'v79WakeComet', 'v80EclipseManta'];
+      if (kind === 'fork')    return ['v79WakeComet', 'v80GravityStone', 'v79Orbiter'];
+      if (kind === 'preboss') return ['v80EclipseManta', 'v79Orbiter'];
+      if (kind === 'secret')  return ['v79Orbiter'];
+      return ['v79Orbiter'];
+    }
+    function spawnRoomEnemies80(room, palette) {
+      try {
+        if (typeof createEnemy !== 'function') return;
+        for (let i = 0; i < palette.length; i++) {
+          const id = palette[i];
+          const x = room.width * (0.28 + 0.18 * (i % 3) + Math.random() * 0.06);
+          const y = room.height * (0.32 + 0.18 * Math.floor(i / 3) + Math.random() * 0.06);
+          const e = createEnemy(id, x, y, state.levelIndex || 0);
+          if (e) {
+            e.wakeRadius = Math.max(e.wakeRadius || 0, 9999);
+            room.enemies.push(e);
+            sys.stats.enemiesSpawned += 1;
+          }
+        }
+      } catch (e) { log80(e, 'spawnRoomEnemies'); }
+    }
+    function spawnDrownedSun80(room) {
+      try {
+        if (typeof createEnemy !== 'function') return null;
+        const boss = createEnemy('v80DrownedSun', room.width * 0.5, room.height * 0.40, state.levelIndex || 0);
+        if (!boss) return null;
+        boss.wakeRadius = 9999;
+        boss._v80Phase = 1;
+        boss._v80FireCd = 1.4;
+        boss._v80RingCd = 3.6;
+        boss._v80SpawnCd = 7.0;
+        boss._v80SweepCd = 5.0;
+        boss._v80EclipseCd = 8.0;
+        boss._v80GravityCd = 12.0;
+        boss._v80DrownedSun = true;
+        room.enemies.push(boss);
+        sys.stats.bossSpawned += 1;
+        return boss;
+      } catch (e) { log80(e, 'spawnBoss'); return null; }
+    }
+
+    // -----------------------------------------------------------------
+    // Stage install: 8-9 rooms in a branching graph
+    //   entry -> spine -> open -> fork -> { side_A | side_B } -> preboss -> boss
+    //   side_A and side_B converge at preboss
+    // -----------------------------------------------------------------
+    function installDrownedSkyStage80() {
+      try {
+        if (!state.level || !Array.isArray(state.level.rooms)) return false;
+        const level = state.level;
+        // Sun-victory credit if not already recorded
+        try {
+          if (state.save) {
+            state.save.victories = state.save.victories || {};
+            if (!state.save.victories._v80CountedSunThisRun) {
+              state.save.victories.sunClears = Math.max(1, N(state.save.victories.sunClears) + 1);
+              state.save.victories._v80CountedSunThisRun = true;
+            }
+          }
+        } catch (_) {}
+        const baseId = level.rooms.length;
+        let seq = 0;
+        const rEntry   = makeStageRoom80(level, baseId + seq++,  0, 'entry',   { label: 'Cold Threshold' });
+        const rSpine   = makeStageRoom80(level, baseId + seq++,  1, 'spine',   { label: 'Drowned Corridor' });
+        const rOpen    = makeStageRoom80(level, baseId + seq++,  2, 'open',    { label: 'Drowned Expanse' });
+        const rFork    = makeStageRoom80(level, baseId + seq++,  3, 'fork',    { label: 'The Forked Tide' });
+        const rSideA   = makeStageRoom80(level, baseId + seq++,  4, 'ring',    { label: 'The Quiet Ring' });
+        const rSideB   = makeStageRoom80(level, baseId + seq++,  4, 'spine',   { label: 'The Long Comet' });
+        const rPreboss = makeStageRoom80(level, baseId + seq++,  5, 'preboss', { label: 'The Hollow Vigil' });
+        const rBoss    = makeStageRoom80(level, baseId + seq++,  6, 'boss',    { label: 'The Drowned Well' });
+        // Door graph
+        rEntry._v80Doors = [
+          { kind: 'side', x: rEntry.width - 110, y: rEntry.height * 0.5, r: 44, to: rSpine.id, needsCleared: true, active: true, arrive: { x: 188, y: rSpine.height * 0.5 } }
+        ];
+        rSpine._v80Doors = [
+          { kind: 'back', x: 110, y: rSpine.height * 0.5, r: 38, to: rEntry.id, active: true, arrive: { x: rEntry.width - 188, y: rEntry.height * 0.5 } },
+          { kind: 'side', x: rSpine.width - 110, y: rSpine.height * 0.5, r: 44, to: rOpen.id, needsCleared: true, active: true, arrive: { x: 188, y: rOpen.height * 0.5 } }
+        ];
+        rOpen._v80Doors = [
+          { kind: 'back', x: 110, y: rOpen.height * 0.5, r: 38, to: rSpine.id, active: true, arrive: { x: rSpine.width - 188, y: rSpine.height * 0.5 } },
+          { kind: 'side', x: rOpen.width - 110, y: rOpen.height * 0.5, r: 44, to: rFork.id, needsCleared: true, active: true, arrive: { x: 188, y: rFork.height * 0.5 } }
+        ];
+        rFork._v80Doors = [
+          { kind: 'back', x: 110, y: rFork.height * 0.5, r: 38, to: rOpen.id, active: true, arrive: { x: rOpen.width - 188, y: rOpen.height * 0.5 } },
+          { kind: 'forkA', x: rFork.width - 110, y: rFork.height * 0.30, r: 42, to: rSideA.id, needsCleared: true, active: true, arrive: { x: 188, y: rSideA.height * 0.5 }, label: 'A' },
+          { kind: 'forkB', x: rFork.width - 110, y: rFork.height * 0.70, r: 42, to: rSideB.id, needsCleared: true, active: true, arrive: { x: 188, y: rSideB.height * 0.5 }, label: 'B' }
+        ];
+        rSideA._v80Doors = [
+          { kind: 'back', x: 110, y: rSideA.height * 0.5, r: 38, to: rFork.id, active: true, arrive: { x: rFork.width - 188, y: rFork.height * 0.30 } },
+          { kind: 'side', x: rSideA.width - 110, y: rSideA.height * 0.5, r: 44, to: rPreboss.id, needsCleared: true, active: true, arrive: { x: 188, y: rPreboss.height * 0.5 } }
+        ];
+        rSideB._v80Doors = [
+          { kind: 'back', x: 110, y: rSideB.height * 0.5, r: 38, to: rFork.id, active: true, arrive: { x: rFork.width - 188, y: rFork.height * 0.70 } },
+          { kind: 'side', x: rSideB.width - 110, y: rSideB.height * 0.5, r: 44, to: rPreboss.id, needsCleared: true, active: true, arrive: { x: 188, y: rPreboss.height * 0.5 } }
+        ];
+        rPreboss._v80Doors = [
+          { kind: 'side', x: rPreboss.width - 110, y: rPreboss.height * 0.5, r: 44, to: rBoss.id, needsCleared: true, active: true, arrive: { x: rBoss.width * 0.5, y: rBoss.height * 0.78 } }
+        ];
+        rBoss._v80Doors = [
+          { kind: 'back', x: 110, y: rBoss.height * 0.78, r: 38, to: rPreboss.id, active: true, arrive: { x: rPreboss.width - 188, y: rPreboss.height * 0.5 } }
+        ];
+        const allRooms = [rEntry, rSpine, rOpen, rFork, rSideA, rSideB, rPreboss, rBoss];
+        for (const r of allRooms) level.rooms.push(r);
+        sys.stats.roomsBuilt += allRooms.length;
+        // Populate enemies (skip preboss and boss; preboss gets minimal threat)
+        for (const r of [rEntry, rSpine, rOpen, rFork, rSideA, rSideB, rPreboss]) {
+          spawnRoomEnemies80(r, enemyPaletteForKind80(r._v80RoomKind, r._v80RoomSeq));
+        }
+        spawnDrownedSun80(rBoss);
+        // Transition the player into the entry room
+        if (typeof triggerTransition === 'function') {
+          triggerTransition(function () {
+            try {
+              syncActiveRoom(level, rEntry.id, null);
+              if (state.player) {
+                state.player.x = rEntry.width * 0.5;
+                state.player.y = rEntry.height * 0.78;
+                state.camera.x = state.player.x;
+                state.camera.y = state.player.y;
+                state.player.hitInvuln = Math.max(N(state.player.hitInvuln), 1.4);
+              }
+              try { recomputePlayerStats(false); } catch (_) {}
+              try { if (typeof pushMessage === 'function') pushMessage(V80_NAMES.stageHint, '#bde7ff', 22, 2.0, 0.22); } catch (_) {}
+            } catch (e) { log80(e, 'transition cb'); }
+          });
+        }
+        sys.stats.stageInstalls += 1;
+        state._v79InDrownedSky = true; // stop v79 from also installing
+        state._v80InDrownedSky = true;
+        return true;
+      } catch (e) { log80(e, 'installStage'); return false; }
+    }
+
+    // -----------------------------------------------------------------
+    // Crater touch — PRE-base updateGame so we beat v79 in the same frame
+    // -----------------------------------------------------------------
+    if (typeof updateGame === 'function' && !updateGame.__v80DrownedSkyStage) {
+      const baseUpdate80 = updateGame;
+      updateGame = function (dt) {
+        try {
+          if (state.mode === 'play' && !state._v80InDrownedSky && state.player) {
+            const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+            const crater = room && room._v77SunCrater;
+            if (crater && crater.open && crater.active) {
+              const dc = Math.hypot(state.player.x - crater.x, state.player.y - crater.y);
+              if (dc < crater.r * 0.72 + (state.player.r || 17)) {
+                installDrownedSkyStage80();
+                crater.active = false;
+              }
+            }
+          }
+        } catch (e) { log80(e, 'preUpdate'); }
+        const out = baseUpdate80.apply(this, arguments);
+        try {
+          const d = Math.min(0.08, Math.max(0, N(dt)));
+          if (d > 0) {
+            tickV80Doors(d);
+            tickV80ColdLantern(d);
+            tickV80RoomCleared(d);
+            applyGravityStonePull(d);
+          }
+        } catch (e) { log80(e, 'updateGame'); }
+        return out;
+      };
+      updateGame.__v80DrownedSkyStage = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Room cleared autodetection (for v80 rooms only)
+    // -----------------------------------------------------------------
+    function tickV80RoomCleared(dt) {
+      try {
+        if (state.mode !== 'play') return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !room._v80DrownedSky || room.cleared) return;
+        const alive = (room.enemies || []).some(function (e) { return e && !e.remove; });
+        if (!alive) {
+          room.cleared = true;
+          try { if (typeof spawnRing === 'function') spawnRing(state.player.x, state.player.y, '#bde7ff', 84); } catch (_) {}
+        }
+      } catch (e) { log80(e, 'tickRoomCleared'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Door tick
+    // -----------------------------------------------------------------
+    function tickV80Doors(dt) {
+      try {
+        if (state.mode !== 'play' || !state.player) return;
+        if (state.transition && state.transition.active) return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !Array.isArray(room._v80Doors)) return;
+        for (const door of room._v80Doors) {
+          const active = door.active !== false && (!door.needsCleared || room.cleared);
+          if (!active) continue;
+          const dx = state.player.x - door.x, dy = state.player.y - door.y;
+          if (Math.hypot(dx, dy) < (door.r || 44) + state.player.r + 6) {
+            if (state.roomHopCd > 0) return;
+            const target = state.level && state.level.rooms[door.to];
+            if (!target) return;
+            syncActiveRoom(state.level, target.id, null);
+            if (door.arrive && state.player) {
+              state.player.x = door.arrive.x;
+              state.player.y = door.arrive.y;
+              state.camera.x = state.player.x;
+              state.camera.y = state.player.y;
+            }
+            state.roomHopCd = 0.24;
+            try { if (typeof spawnRing === 'function') spawnRing(state.player.x, state.player.y, '#bde7ff', 56); } catch (_) {}
+            break;
+          }
+        }
+      } catch (e) { log80(e, 'tickDoors'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Eclipse Manta tick — slow drift; occludes beacons in its radius
+    // -----------------------------------------------------------------
+    function tickV80EclipseManta(e, dt) {
+      try {
+        const p = state.player; if (!p) return;
+        const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+        const dirX = dx / d, dirY = dy / d;
+        e.vx = (e.vx || 0) * 0.92 + dirX * (e.speed || 45) * 0.08;
+        e.vy = (e.vy || 0) * 0.92 + dirY * (e.speed || 45) * 0.08;
+        e.angle = Math.atan2(dirY, dirX);
+        try { if (typeof moveEntity === 'function') moveEntity(e, e.vx * dt, e.vy * dt); else { e.x += e.vx * dt; e.y += e.vy * dt; } } catch (_) {}
+        // Contact damage
+        if (Math.hypot(p.x - e.x, p.y - e.y) < (p.r || 17) + e.r + 2) {
+          try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (_) {}
+        }
+      } catch (err) { log80(err, 'tickEclipseManta'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Gravity Stone tick — stationary, but pulls player + projectiles
+    // -----------------------------------------------------------------
+    function tickV80GravityStone(e, dt) {
+      try {
+        e.vx = 0; e.vy = 0;
+        e._v80SpinAngle = N(e._v80SpinAngle) + dt * 1.6;
+      } catch (err) { log80(err, 'tickGravityStone'); }
+    }
+    function applyGravityStonePull(dt) {
+      try {
+        if (state.mode !== 'play') return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !Array.isArray(room.enemies)) return;
+        const stones = room.enemies.filter(function (e) { return e && !e.remove && e.typeId === 'v80GravityStone'; });
+        if (!stones.length) return;
+        const p = state.player;
+        if (p) {
+          for (const s of stones) {
+            const dx = s.x - p.x, dy = s.y - p.y, d = Math.hypot(dx, dy) || 1;
+            const pullRadius = 360;
+            if (d < pullRadius) {
+              const force = (1 - d / pullRadius) * 130;
+              p.vx = (p.vx || 0) + (dx / d) * force * dt;
+              p.vy = (p.vy || 0) + (dy / d) * force * dt;
+            }
+          }
+        }
+        // Mild pull on player bullets too — visual interest
+        if (Array.isArray(state.bullets)) {
+          for (const b of state.bullets) {
+            if (!b || b.owner !== 'player') continue;
+            for (const s of stones) {
+              const dx = s.x - b.x, dy = s.y - b.y, d = Math.hypot(dx, dy) || 1;
+              const pullRadius = 220;
+              if (d < pullRadius) {
+                const force = (1 - d / pullRadius) * 40;
+                b.vx = (b.vx || 0) + (dx / d) * force * dt;
+                b.vy = (b.vy || 0) + (dy / d) * force * dt;
+              }
+            }
+          }
+        }
+      } catch (e) { log80(e, 'applyGravityPull'); }
+    }
+
+    // -----------------------------------------------------------------
+    // v80 boss tick — 3 phases
+    // -----------------------------------------------------------------
+    function tickV80DrownedSun(e, dt) {
+      try {
+        const p = state.player; if (!p) return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room) return;
+        const hp = N(e.hp), maxHp = N(e.maxHp, 220);
+        const ratio = hp / Math.max(1, maxHp);
+        const wantPhase = ratio <= 0.20 ? 3 : ratio <= 0.55 ? 2 : 1;
+        if (wantPhase !== N(e._v80Phase, 1)) {
+          const prev = N(e._v80Phase, 1);
+          e._v80Phase = wantPhase;
+          state._v80SunPhaseFlash = 1.0;
+          try { if (typeof shake === 'function') shake(wantPhase === 3 ? 22 : 14); } catch (_) {}
+          try { if (typeof spawnRing === 'function') spawnRing(e.x, e.y, '#ffffff', wantPhase === 3 ? 380 : 280); } catch (_) {}
+          try { if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles(); } catch (_) {}
+          if (wantPhase === 2) sys.stats.bossPhase2 += 1;
+          if (wantPhase === 3) sys.stats.bossPhase3 += 1;
+          if (wantPhase === 3 && typeof pushMessage === 'function') pushMessage('THE WELL DARKENS', '#a89bff', 22, 2.0, 0.22);
+        }
+        const phase = N(e._v80Phase, 1);
+        const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+        const dirX = dx / d, dirY = dy / d;
+        if (phase === 1) {
+          const cx = room.width * 0.5, cy = room.height * 0.42;
+          e.x = cx + Math.sin((state.time || 0) * 0.40) * 36;
+          e.y = cy + Math.cos((state.time || 0) * 0.32) * 24;
+          e.vx = 0; e.vy = 0; e.angle += dt * 0.10;
+          e._v80FireCd = Math.max(0, N(e._v80FireCd) - dt);
+          e._v80RingCd = Math.max(0, N(e._v80RingCd) - dt);
+          e._v80SpawnCd = Math.max(0, N(e._v80SpawnCd) - dt);
+          if (e._v80RingCd <= 0 && typeof fireEnemyRing === 'function') {
+            fireEnemyRing(e, 12, 200 + (state.levelIndex || 0) * 4, 4.0, 1, 4.8, '#bde7ff', (state.time || 0) * 0.3);
+            e._v80RingCd = 2.4;
+          }
+          if (e._v80FireCd <= 0 && typeof fireEnemyBurst === 'function') {
+            fireEnemyBurst(e, 3, 0.32, 240 + (state.levelIndex || 0) * 5, 3.6, 1, 4.5, '#a89bff');
+            e._v80FireCd = 1.8;
+          }
+          if (e._v80SpawnCd <= 0 && typeof createEnemy === 'function') {
+            const orb = createEnemy('v79Orbiter', e.x + (Math.random() - 0.5) * 80, e.y + 80 + (Math.random() - 0.5) * 40, state.levelIndex || 0);
+            if (orb && room.enemies) {
+              orb.wakeRadius = 9999;
+              room.enemies.push(orb);
+              if (state.enemies !== room.enemies) state.enemies.push(orb);
+            }
+            e._v80SpawnCd = 8.5;
+          }
+        } else if (phase === 2) {
+          const orbit = (state.time || 0) * 0.50;
+          const tx = room.width * 0.5 + Math.cos(orbit) * room.width * 0.22;
+          const ty = room.height * 0.42 + Math.sin(orbit * 1.2) * room.height * 0.18;
+          e.vx = (e.vx || 0) * 0.80 + (tx - e.x) * 0.030;
+          e.vy = (e.vy || 0) * 0.80 + (ty - e.y) * 0.030;
+          try { if (typeof moveEntity === 'function') moveEntity(e, e.vx * dt, e.vy * dt); else { e.x += e.vx * dt; e.y += e.vy * dt; } } catch (_) {}
+          e.angle = Math.atan2(dirY, dirX);
+          e._v80FireCd = Math.max(0, N(e._v80FireCd) - dt);
+          e._v80RingCd = Math.max(0, N(e._v80RingCd) - dt);
+          e._v80SweepCd = Math.max(0, N(e._v80SweepCd) - dt);
+          if (e._v80FireCd <= 0 && typeof fireEnemyBurst === 'function') {
+            fireEnemyBurst(e, 5, 0.55, 280 + (state.levelIndex || 0) * 7, 3.6, 1, 4.6, '#a89bff');
+            e._v80FireCd = 1.1;
+          }
+          if (e._v80RingCd <= 0 && typeof fireEnemyRing === 'function') {
+            fireEnemyRing(e, 16, 240 + (state.levelIndex || 0) * 5, 4.0, 1, 4.8, '#ffffff', (state.time || 0) * 0.42);
+            e._v80RingCd = 1.8;
+          }
+          if (e._v80SweepCd <= 0) {
+            const ang = Math.atan2(dirY, dirX);
+            for (let i = -4; i <= 4; i++) {
+              const a = ang + i * 0.07;
+              const speed = 320;
+              if (Array.isArray(state.bullets)) {
+                state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.6, damage: 1, color: '#bde7ff' });
+              }
+            }
+            e._v80SweepCd = 4.5;
+          }
+        } else {
+          // PHASE 3 — Final desperation. Faster, smaller orbit, gravity stones,
+          // brief eclipse darkening, double rings + aimed bursts.
+          const orbit = (state.time || 0) * 0.78;
+          const tx = room.width * 0.5 + Math.cos(orbit) * room.width * 0.15;
+          const ty = room.height * 0.46 + Math.sin(orbit * 1.4) * room.height * 0.12;
+          e.vx = (e.vx || 0) * 0.78 + (tx - e.x) * 0.040;
+          e.vy = (e.vy || 0) * 0.78 + (ty - e.y) * 0.040;
+          try { if (typeof moveEntity === 'function') moveEntity(e, e.vx * dt, e.vy * dt); else { e.x += e.vx * dt; e.y += e.vy * dt; } } catch (_) {}
+          e.angle = Math.atan2(dirY, dirX);
+          e._v80FireCd = Math.max(0, N(e._v80FireCd) - dt);
+          e._v80RingCd = Math.max(0, N(e._v80RingCd) - dt);
+          e._v80SweepCd = Math.max(0, N(e._v80SweepCd) - dt);
+          e._v80EclipseCd = Math.max(0, N(e._v80EclipseCd) - dt);
+          e._v80GravityCd = Math.max(0, N(e._v80GravityCd) - dt);
+          state._v80EclipsePulse = Math.max(0, N(state._v80EclipsePulse) - dt * 0.45);
+          if (e._v80FireCd <= 0 && typeof fireEnemyBurst === 'function') {
+            fireEnemyBurst(e, 6, 0.50, 320 + (state.levelIndex || 0) * 7, 3.4, 1, 4.6, '#ffffff');
+            e._v80FireCd = 0.95;
+          }
+          if (e._v80RingCd <= 0 && typeof fireEnemyRing === 'function') {
+            fireEnemyRing(e, 20, 260 + (state.levelIndex || 0) * 6, 4.0, 1, 4.7, '#a89bff', (state.time || 0) * 0.55);
+            e._v80RingCd = 1.5;
+          }
+          if (e._v80SweepCd <= 0) {
+            // Two crossed sweep rays
+            const ang = Math.atan2(dirY, dirX);
+            for (const off of [0, Math.PI * 0.5]) {
+              for (let i = -3; i <= 3; i++) {
+                const a = ang + off + i * 0.09;
+                const speed = 340;
+                if (Array.isArray(state.bullets)) {
+                  state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.4, damage: 1, color: '#bde7ff' });
+                }
+              }
+            }
+            e._v80SweepCd = 3.8;
+          }
+          if (e._v80GravityCd <= 0 && typeof createEnemy === 'function') {
+            // Spawn a temporary Gravity Stone near the edge of the arena
+            const a = Math.random() * TAU80;
+            const sx = room.width * 0.5 + Math.cos(a) * room.width * 0.32;
+            const sy = room.height * 0.5 + Math.sin(a) * room.height * 0.26;
+            const stone = createEnemy('v80GravityStone', sx, sy, state.levelIndex || 0);
+            if (stone && room.enemies) {
+              stone.wakeRadius = 9999;
+              stone.hp = 4; // weaker so the player can clear them if needed
+              room.enemies.push(stone);
+              if (state.enemies !== room.enemies) state.enemies.push(stone);
+            }
+            e._v80GravityCd = 14.0;
+          }
+          if (e._v80EclipseCd <= 0) {
+            state._v80EclipsePulse = 1.0;
+            e._v80EclipseCd = 10.0;
+          }
+        }
+        state._v80SunPhaseFlash = Math.max(0, N(state._v80SunPhaseFlash) - dt * 0.7);
+        if (Math.hypot(p.x - e.x, p.y - e.y) < (p.r || 17) + (e.r || 60) + 2) {
+          try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (_) {}
+        }
+      } catch (err) { log80(err, 'tickBoss'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Hook updateEnemies (outer wrap)
+    // -----------------------------------------------------------------
+    if (typeof updateEnemies === 'function' && !updateEnemies.__v80DrownedSkyStage) {
+      const baseUpdateEnemies80 = updateEnemies;
+      updateEnemies = function (dt) {
+        const out = baseUpdateEnemies80.apply(this, arguments);
+        try {
+          if (state.mode === 'play') {
+            for (const e of state.enemies || []) {
+              if (!e || e.remove) continue;
+              if (e.behavior === 'v80EclipseManta') tickV80EclipseManta(e, dt);
+              else if (e.behavior === 'v80GravityStone') tickV80GravityStone(e, dt);
+              else if (e.behavior === 'v80DrownedSun') tickV80DrownedSun(e, dt);
+            }
+          }
+        } catch (e) { log80(e, 'updateEnemies post'); }
+        return out;
+      };
+      updateEnemies.__v80DrownedSkyStage = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Drawing v80 enemies + boss
+    // -----------------------------------------------------------------
+    function drawV80Enemy(e) {
+      try {
+        ctx.save();
+        ctx.translate(e.x, e.y);
+        const id = e.typeId;
+        if (id === 'v80EclipseManta') {
+          // Wide dark wing with cold rim
+          const wing = e.r * 2.4;
+          ctx.rotate(e.angle || 0);
+          ctx.fillStyle = rgba80('#02030a', 0.88);
+          ctx.beginPath(); ctx.ellipse(0, 0, wing, e.r * 0.72, 0, 0, TAU80); ctx.fill();
+          ctx.strokeStyle = rgba80('#a89bff', 0.62);
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.ellipse(0, 0, wing, e.r * 0.72, 0, 0, TAU80); ctx.stroke();
+          // Twin eye dots
+          ctx.fillStyle = rgba80('#bde7ff', 0.84);
+          ctx.beginPath(); ctx.arc(-wing * 0.30, 0, 2, 0, TAU80); ctx.fill();
+          ctx.beginPath(); ctx.arc(wing * 0.30, 0, 2, 0, TAU80); ctx.fill();
+          // Occlude radius hint (faint outer ring)
+          ctx.strokeStyle = rgba80('#02030a', 0.34);
+          ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.arc(0, 0, 250, 0, TAU80); ctx.stroke();
+        } else if (id === 'v80GravityStone') {
+          // Cracked black stone with orbiting dust
+          ctx.fillStyle = rgba80('#03030a', 0.94);
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU80); ctx.fill();
+          ctx.strokeStyle = rgba80('#a89bff', 0.42);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU80); ctx.stroke();
+          // Cracks
+          ctx.strokeStyle = rgba80('#5a7bff', 0.34);
+          ctx.lineWidth = 1.2;
+          for (let i = 0; i < 4; i++) {
+            const a = i * Math.PI / 4 + N(e._v80SpinAngle) * 0.1;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(a) * e.r * 0.84, Math.sin(a) * e.r * 0.84);
+            ctx.stroke();
+          }
+          // Dust ring
+          const ringR = e.r + 14;
+          ctx.strokeStyle = rgba80('#bde7ff', 0.30);
+          ctx.lineWidth = 1.0;
+          ctx.beginPath(); ctx.arc(0, 0, ringR, 0, TAU80); ctx.stroke();
+          // Orbiting dots
+          for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * TAU80 + N(e._v80SpinAngle);
+            const r = ringR + Math.sin(N(state.time) * 2 + i) * 2;
+            ctx.fillStyle = rgba80('#bde7ff', 0.62);
+            ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 1.4, 0, TAU80); ctx.fill();
+          }
+          // Pull radius hint (very faint)
+          ctx.strokeStyle = rgba80('#5a7bff', 0.10);
+          ctx.lineWidth = 1.0;
+          ctx.beginPath(); ctx.arc(0, 0, 340, 0, TAU80); ctx.stroke();
+        } else if (id === 'v80DrownedSun') {
+          ctx.rotate(e.angle || 0);
+          const phase = N(e._v80Phase, 1);
+          const flash = Math.max(0, Math.min(1, N(state._v80SunPhaseFlash)));
+          // Dark core
+          ctx.fillStyle = rgba80('#000000', 0.96);
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU80); ctx.fill();
+          // Corona
+          const coronaR = e.r * (phase === 3 ? 2.2 : phase === 2 ? 1.9 : 1.6);
+          const corona = ctx.createRadialGradient(0, 0, e.r * 0.7, 0, 0, coronaR);
+          const c1 = phase === 3 ? '#7a5aff' : phase === 2 ? '#a89bff' : '#5a7bff';
+          const c2 = phase === 3 ? '#3a1aaa' : phase === 2 ? '#7a5aff' : '#3050ff';
+          corona.addColorStop(0, rgba80(c1, 0.74));
+          corona.addColorStop(0.5, rgba80(c2, 0.30));
+          corona.addColorStop(1, rgba80('#000000', 0));
+          ctx.fillStyle = corona;
+          ctx.beginPath(); ctx.arc(0, 0, coronaR, 0, TAU80); ctx.fill();
+          // Rim
+          ctx.strokeStyle = rgba80(phase === 3 ? '#ffffff' : phase === 2 ? '#ffffff' : '#bde7ff', 0.62);
+          ctx.lineWidth = 2.4;
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU80); ctx.stroke();
+          // Flares
+          ctx.save();
+          ctx.rotate((state.time || 0) * (phase === 3 ? 1.2 : phase === 2 ? 0.9 : 0.4));
+          ctx.strokeStyle = rgba80(phase === 3 ? '#ffffff' : '#a89bff', 0.42);
+          ctx.lineWidth = 2;
+          const flareCount = phase === 3 ? 12 : 8;
+          for (let i = 0; i < flareCount; i++) {
+            const a = i * TAU80 / flareCount;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * e.r * 0.9, Math.sin(a) * e.r * 0.9);
+            ctx.lineTo(Math.cos(a) * e.r * (1.5 + phase * 0.1), Math.sin(a) * e.r * (1.5 + phase * 0.1));
+            ctx.stroke();
+          }
+          ctx.restore();
+          // Phase flash
+          if (flash > 0.02) {
+            ctx.strokeStyle = rgba80('#ffffff', flash * 0.86);
+            ctx.lineWidth = 3 + flash * 4;
+            ctx.beginPath(); ctx.arc(0, 0, e.r * (1.2 + flash * 0.4), 0, TAU80); ctx.stroke();
+          }
+        }
+        ctx.restore();
+      } catch (e) { log80(e, 'drawEnemy'); }
+    }
+    if (typeof drawEnemy === 'function' && !drawEnemy.__v80DrownedSkyStage) {
+      const baseDrawEnemy80 = drawEnemy;
+      drawEnemy = function (enemy) {
+        if (enemy && /^v80/.test(enemy.typeId || '')) {
+          try { drawV80Enemy(enemy); return; } catch (e) { log80(e, 'drawEnemy hook'); }
+        }
+        return baseDrawEnemy80.apply(this, arguments);
+      };
+      drawEnemy.__v80DrownedSkyStage = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Boss bar override — 3 phase pips
+    // -----------------------------------------------------------------
+    if (typeof drawBossBar === 'function' && !drawBossBar.__v80DrownedSkyStage) {
+      const baseBossBar80 = drawBossBar;
+      drawBossBar = function () {
+        const boss = state.enemies && state.enemies.find(function (e) { return e && e.typeId === 'v80DrownedSun' && !e.remove; });
+        if (!boss) return baseBossBar80.apply(this, arguments);
+        try {
+          const pct = Math.max(0, Math.min(1, N(boss.hp) / Math.max(1, N(boss.maxHp, 220))));
+          const compact = W < 760;
+          const w = Math.min(compact ? Math.max(188, W - 152) : 380, W - 96);
+          const h = compact ? 10 : 12;
+          const x = W * 0.5 - w * 0.5;
+          const y = compact ? 10 : 12;
+          const phase = N(boss._v80Phase, 1);
+          ctx.save();
+          ctx.fillStyle = 'rgba(8,4,28,0.78)';
+          ctx.beginPath();
+          if (typeof roundRectPath === 'function') roundRectPath(ctx, x - 8, y - 2, w + 16, 30, 14);
+          else ctx.rect(x - 8, y - 2, w + 16, 30);
+          ctx.fill();
+          ctx.font = compact ? '700 10px Inter, system-ui, sans-serif' : '700 12px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#bde7ff';
+          ctx.fillText(V80_NAMES.bossBar, W * 0.5, y + 9);
+          // Phase pips
+          const pipY = y + 9;
+          const startX = W * 0.5 + (compact ? 50 : 64);
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(startX + i * 15, pipY - 1, 4.2, 0, TAU80);
+            ctx.fillStyle = i < phase ? (i === 2 ? '#ffffff' : '#dff6ff') : 'rgba(255,246,184,0.28)';
+            ctx.fill();
+          }
+          ctx.fillStyle = 'rgba(255,255,255,0.10)';
+          ctx.beginPath();
+          if (typeof roundRectPath === 'function') roundRectPath(ctx, x, y + 13, w, h, 7);
+          else ctx.rect(x, y + 13, w, h);
+          ctx.fill();
+          const grd = ctx.createLinearGradient(x, y, x + w, y);
+          grd.addColorStop(0, '#5a7bff');
+          grd.addColorStop(1, '#a89bff');
+          ctx.fillStyle = grd;
+          ctx.beginPath();
+          if (typeof roundRectPath === 'function') roundRectPath(ctx, x + 1, y + 14, (w - 2) * pct, h - 2, 6);
+          else ctx.rect(x + 1, y + 14, (w - 2) * pct, h - 2);
+          ctx.fill();
+          ctx.restore();
+        } catch (e) { log80(e, 'drawBossBar'); }
+      };
+      drawBossBar.__v80DrownedSkyStage = true;
+    }
+
+    // -----------------------------------------------------------------
+    // World draws: beacons (with occlusion), doors, Cold Lantern,
+    // boss phase 3 eclipse pulse overlay.
+    // -----------------------------------------------------------------
+    function occlusionAt(room, x, y) {
+      try {
+        if (!room || !Array.isArray(room.enemies)) return 0;
+        let occ = 0;
+        for (const e of room.enemies) {
+          if (!e || e.remove) continue;
+          if (e.typeId !== 'v80EclipseManta') continue;
+          const d = Math.hypot(x - e.x, y - e.y);
+          if (d < 250) occ = Math.max(occ, 1 - d / 250);
+        }
+        return occ;
+      } catch (_) { return 0; }
+    }
+    function drawV80World() {
+      try {
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !room._v80DrownedSky) return;
+        const t = N(state.time);
+        ctx.save();
+        ctx.translate(-state.camera.x + (typeof playViewCenterX === 'function' ? playViewCenterX() : W * 0.5),
+                      -state.camera.y + (typeof playViewCenterY === 'function' ? playViewCenterY() : H * 0.5));
+        if (Array.isArray(room._v80Beacons)) {
+          for (const b of room._v80Beacons) {
+            const occ = occlusionAt(room, b.x, b.y);
+            drawBeacon80(b, t, occ);
+          }
+        }
+        if (Array.isArray(room._v80Doors)) {
+          for (const door of room._v80Doors) drawV80Door(door, room);
+        }
+        if (room._v80ColdLantern) drawV80ColdLantern(room._v80ColdLantern);
+        ctx.restore();
+        // Boss-phase-3 eclipse: brief screen dim over canvas
+        const pulse = Math.max(0, Math.min(1, N(state._v80EclipsePulse)));
+        if (pulse > 0.02) {
+          ctx.save();
+          ctx.fillStyle = 'rgba(0,0,0,' + (0.55 * pulse).toFixed(3) + ')';
+          ctx.fillRect(0, 0, W, H);
+          ctx.restore();
+        }
+      } catch (e) { log80(e, 'drawV80World'); }
+    }
+    function drawV80Door(door, room) {
+      try {
+        const active = door.active !== false && (!door.needsCleared || room.cleared);
+        const r = door.r || 42;
+        const alpha = active ? 1 : 0.30;
+        const t = N(state.time);
+        ctx.save();
+        ctx.translate(door.x, door.y);
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = rgba80('#02030a', 0.78 * alpha);
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.06, r * 0.66, 0, 0, TAU80); ctx.fill();
+        ctx.strokeStyle = rgba80(door.kind === 'forkA' ? '#bde7ff' : door.kind === 'forkB' ? '#a89bff' : '#bde7ff', 0.62 * alpha);
+        ctx.lineWidth = 2.8;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.10, r * 0.70, 0, 0, TAU80); ctx.stroke();
+        for (let i = 0; i < 8; i++) {
+          const a = i * TAU80 / 8 + t * 0.45;
+          ctx.fillStyle = rgba80(i % 2 ? '#a89bff' : '#bde7ff', 0.24 * alpha);
+          ctx.beginPath(); ctx.arc(Math.cos(a) * r * 0.92, Math.sin(a) * r * 0.45, 2, 0, TAU80); ctx.fill();
+        }
+        ctx.restore();
+      } catch (e) { log80(e, 'drawDoor'); }
+    }
+    function drawV80ColdLantern(c) {
+      try {
+        const t = N(state.time);
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.globalCompositeOperation = 'screen';
+        const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, c.r * 2.4);
+        halo.addColorStop(0, rgba80('#bde7ff', 0.46));
+        halo.addColorStop(0.5, rgba80('#a89bff', 0.16));
+        halo.addColorStop(1, rgba80('#000000', 0));
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(0, 0, c.r * 2.4, 0, TAU80); ctx.fill();
+        ctx.strokeStyle = rgba80('#a89bff', 0.72);
+        ctx.lineWidth = 3;
+        ctx.setLineDash([14, 8]);
+        ctx.lineDashOffset = -t * 12;
+        ctx.beginPath(); ctx.arc(0, 0, c.r, 0, TAU80); ctx.stroke();
+        ctx.setLineDash([]);
+        const pulse = 0.7 + 0.3 * Math.sin(t * 2.4);
+        ctx.fillStyle = rgba80('#ffffff', 0.86 * pulse);
+        ctx.beginPath(); ctx.arc(0, 0, 6 + 2 * pulse, 0, TAU80); ctx.fill();
+        ctx.strokeStyle = rgba80('#dff6ff', 0.62);
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 6; i++) {
+          const a = i * TAU80 / 6 + t * 0.4;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
+          ctx.lineTo(Math.cos(a) * 18, Math.sin(a) * 18);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = rgba80('#bde7ff', 0.36);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(0, 0, c.r * 0.62, 0, TAU80); ctx.stroke();
+        ctx.restore();
+      } catch (e) { log80(e, 'drawColdLantern'); }
+    }
+    if (typeof renderWorld === 'function' && !renderWorld.__v80DrownedSkyStage) {
+      const baseRender80 = renderWorld;
+      renderWorld = function () {
+        const out = baseRender80.apply(this, arguments);
+        try { drawV80World(); } catch (e) { log80(e, 'renderWorld'); }
+        try { drawSafeHavenTrophy80(); } catch (e) { log80(e, 'safeHavenTrophy'); }
+        return out;
+      };
+      renderWorld.__v80DrownedSkyStage = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Cold Lantern tick
+    // -----------------------------------------------------------------
+    function tickV80ColdLantern(dt) {
+      try {
+        if (state.mode !== 'play' || !state.player) return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !room._v80ColdLantern) return;
+        const c = room._v80ColdLantern;
+        if (c.touched) return;
+        const dx = state.player.x - c.x, dy = state.player.y - c.y;
+        if (Math.hypot(dx, dy) < c.r + state.player.r + 4) {
+          c.touched = true;
+          sys.stats.coldLanternTouched += 1;
+          completeDrownedSkyVictory80();
+        }
+      } catch (e) { log80(e, 'tickColdLantern'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Boss death: spawn Cold Lantern, safe the room
+    // -----------------------------------------------------------------
+    if (typeof killEnemy === 'function' && !killEnemy.__v80DrownedSkyStage) {
+      const baseKill80 = killEnemy;
+      killEnemy = function (enemy) {
+        const isBoss = enemy && !enemy.remove && enemy.typeId === 'v80DrownedSun';
+        const bx = isBoss ? enemy.x : 0;
+        const by = isBoss ? enemy.y : 0;
+        const out = baseKill80.apply(this, arguments);
+        if (isBoss) {
+          try {
+            const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+            if (room) {
+              if (typeof state.v77MakeMajorBossRoomSafe === 'function') {
+                state.v77MakeMajorBossRoomSafe(room, 'v80DrownedSun', { color: '#bde7ff', invuln: 999 });
+              } else {
+                if (state.player) state.player.hitInvuln = Math.max(state.player.hitInvuln || 0, 999);
+                if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles();
+              }
+              room._v80ColdLantern = { x: bx, y: by, r: 64, touched: false, t: 0, bornAt: N(state.time) };
+              sys.stats.bossDefeated += 1;
+              try { if (typeof spawnRing === 'function') { spawnRing(bx, by, '#ffffff', 360); spawnRing(bx, by, '#bde7ff', 540); } } catch (_) {}
+              try { if (typeof spawnSpark === 'function') for (let i = 0; i < 100; i++) spawnSpark(bx, by, i % 3 ? '#bde7ff' : '#a89bff', 3, 240 + Math.random() * 220); } catch (_) {}
+              try { if (typeof startSlowMo === 'function') startSlowMo(1.8, 0.20); } catch (_) {}
+              try { if (typeof pushMessage === 'function') pushMessage('THE WELL FALLS QUIET', '#bde7ff', 22, 2.4, 0.22); } catch (_) {}
+            }
+          } catch (e) { log80(e, 'killEnemy boss'); }
+        }
+        return out;
+      };
+      killEnemy.__v80DrownedSkyStage = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Victory + persistence
+    // -----------------------------------------------------------------
+    function completeDrownedSkyVictory80() {
+      try {
+        recordDrownedSkyVictory80();
+        state.mode = 'win';
+        state.overlayMode = 'win';
+        try { if (typeof closeDraftUI === 'function') closeDraftUI(); } catch (_) {}
+        try { if (typeof commitRunSummary === 'function') commitRunSummary('win'); } catch (_) {}
+        if (typeof overlay !== 'undefined' && overlay) overlay.classList.remove('hidden');
+        if (typeof overlayTitle !== 'undefined' && overlayTitle) overlayTitle.textContent = 'THE LIGHT STAYS DEAD';
+        if (typeof overlayText !== 'undefined' && overlayText) overlayText.innerHTML = 'You followed the Sun into the place underneath light, and brought back a Cold Lantern.';
+        try {
+          if (typeof startBtn !== 'undefined' && startBtn) {
+            const ch = typeof currentSelectedCharacter === 'function' ? currentSelectedCharacter() : null;
+            const name = (ch && ch.name) || 'Passenger';
+            startBtn.textContent = 'Wake in Safe Haven as ' + name;
+          }
+        } catch (_) {}
+        try { if (typeof showOverlay === 'function') showOverlay('win'); } catch (_) {}
+        sys.stats.winsRecorded += 1;
+      } catch (e) { log80(e, 'completeVictory'); }
+    }
+    function recordDrownedSkyVictory80() {
+      try {
+        const save = state.save || {};
+        save.victories = save.victories || {};
+        save.defeatedBosses = save.defeatedBosses || {};
+        save.victories.drownedSkyClears = Math.max(1, N(save.victories.drownedSkyClears) + 1);
+        save.defeatedBosses.drownedSun = true;
+        save.careerAudit = save.careerAudit || {};
+        save.careerAudit.lastDrownedSkyAt = Date.now();
+        save.careerAudit.lastDrownedSkyBuild = V80_VERSION;
+        state.save = save;
+        try {
+          const raw = localStorage.getItem(MIRROR80);
+          const mirror = raw ? JSON.parse(raw) : {};
+          mirror.victories = mirror.victories || {};
+          mirror.defeatedBosses = mirror.defeatedBosses || {};
+          mirror.victories.drownedSkyClears = Math.max(N(mirror.victories.drownedSkyClears), N(save.victories.drownedSkyClears));
+          mirror.defeatedBosses.drownedSun = true;
+          localStorage.setItem(MIRROR80, JSON.stringify(mirror));
+        } catch (_) {}
+        try { if (typeof safeWriteSave === 'function') safeWriteSave(); else localStorage.setItem(SAVE80, JSON.stringify(save)); } catch (_) {}
+      } catch (e) { log80(e, 'recordVictory'); }
+    }
+
+    function drownedSkyClearsCount80() {
+      try {
+        const s = state.save || {};
+        const v = s.victories || {};
+        let m = {};
+        try { m = JSON.parse(localStorage.getItem(MIRROR80) || '{}') || {}; } catch (_) {}
+        const mv = m.victories || {};
+        return Math.max(N(v.drownedSkyClears), N(mv.drownedSkyClears));
+      } catch (_) { return 0; }
+    }
+
+    // -----------------------------------------------------------------
+    // Safe Haven Cold Lantern shrine — persistent trophy in Safe Haven
+    // -----------------------------------------------------------------
+    function drawSafeHavenTrophy80() {
+      try {
+        if (state.mode !== 'play') return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !room._v31SafeHaven) return;
+        const clears = drownedSkyClearsCount80();
+        if (clears <= 0) return;
+        const t = N(state.time);
+        // Trophy in the top-left quadrant — visible, but not blocking the door
+        const x = room.width * 0.22;
+        const y = room.height * 0.32;
+        ctx.save();
+        ctx.translate(-state.camera.x + (typeof playViewCenterX === 'function' ? playViewCenterX() : W * 0.5),
+                      -state.camera.y + (typeof playViewCenterY === 'function' ? playViewCenterY() : H * 0.5));
+        ctx.translate(x, y);
+        ctx.globalCompositeOperation = 'screen';
+        // Plinth (warm-haven stone with cold inset)
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(46, 32, 18, 0.92)';
+        ctx.beginPath();
+        if (typeof roundRectPath === 'function') roundRectPath(ctx, -42, 20, 84, 26, 7);
+        else ctx.rect(-42, 20, 84, 26);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(189, 231, 255, 0.46)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        if (typeof roundRectPath === 'function') roundRectPath(ctx, -42, 20, 84, 26, 7);
+        else ctx.rect(-42, 20, 84, 26);
+        ctx.stroke();
+        // Suspended Cold Lantern over the plinth
+        ctx.globalCompositeOperation = 'screen';
+        const pulse = 0.7 + 0.3 * Math.sin(t * 2.4);
+        const halo = ctx.createRadialGradient(0, -10, 0, 0, -10, 64);
+        halo.addColorStop(0, rgba80('#bde7ff', 0.40 + 0.20 * pulse));
+        halo.addColorStop(0.5, rgba80('#a89bff', 0.16));
+        halo.addColorStop(1, rgba80('#000000', 0));
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(0, -10, 64, 0, TAU80); ctx.fill();
+        // Frame ring
+        ctx.strokeStyle = rgba80('#a89bff', 0.78);
+        ctx.lineWidth = 2.8;
+        ctx.setLineDash([10, 6]);
+        ctx.lineDashOffset = -t * 10;
+        ctx.beginPath(); ctx.arc(0, -10, 22, 0, TAU80); ctx.stroke();
+        ctx.setLineDash([]);
+        // Cold star
+        ctx.fillStyle = rgba80('#ffffff', 0.92 * pulse);
+        ctx.beginPath(); ctx.arc(0, -10, 4 + pulse, 0, TAU80); ctx.fill();
+        ctx.strokeStyle = rgba80('#dff6ff', 0.68);
+        ctx.lineWidth = 1.2;
+        for (let i = 0; i < 6; i++) {
+          const a = i * TAU80 / 6 + t * 0.5;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 6, -10 + Math.sin(a) * 6);
+          ctx.lineTo(Math.cos(a) * 12, -10 + Math.sin(a) * 12);
+          ctx.stroke();
+        }
+        // Multi-clear: extra orbiting rings (1 per additional clear, capped at 4)
+        const extras = Math.min(4, Math.max(0, clears - 1));
+        for (let i = 0; i < extras; i++) {
+          const ang = t * (0.3 + i * 0.12);
+          const orbR = 30 + i * 6;
+          ctx.strokeStyle = rgba80(i % 2 ? '#bde7ff' : '#a89bff', 0.34);
+          ctx.lineWidth = 1.0;
+          ctx.beginPath(); ctx.arc(0, -10, orbR, 0, TAU80); ctx.stroke();
+          // Tiny moving dot on the orbit
+          ctx.fillStyle = rgba80(i % 2 ? '#bde7ff' : '#a89bff', 0.72);
+          ctx.beginPath(); ctx.arc(Math.cos(ang) * orbR, -10 + Math.sin(ang) * orbR, 1.6, 0, TAU80); ctx.fill();
+        }
+        // Tag line — minimal text. Show count if > 1.
+        if (clears >= 2) {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = 'rgba(189, 231, 255, 0.62)';
+          ctx.font = '900 9px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('×' + clears, 0, 33);
+        }
+        ctx.restore();
+        sys.stats.safeHavenTrophyFrames += 1;
+      } catch (e) { log80(e, 'drawSafeHavenTrophy'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Patch v77 crater renderer to show cold trophy after first clear
+    // (re-applied here for clarity — v79 already did this for v79 clears,
+    //  but v80 is a separate code path; piggyback on the v79 logic).
+    // -----------------------------------------------------------------
+    // (v79's wrap already handles this — we reuse drownedSkyClearsCount80
+    // semantically, but the v79 trophy wrap reads from the same save key,
+    // so first clear from v80 will also turn the v79 trophy on.)
+
+    // -----------------------------------------------------------------
+    // Debug
+    // -----------------------------------------------------------------
+    state.v80Debug = function v80Debug() {
+      const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+      const p = state.player;
+      const save = state.save || {};
+      return {
+        version: V80_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE80,
+        names: V80_NAMES,
+        inDrownedSky: !!state._v80InDrownedSky,
+        room: room && {
+          id: room.id,
+          label: room._v80Label || room.kind,
+          kind: room._v80RoomKind || room.kind,
+          drowned: !!room._v80DrownedSky,
+          safeHaven: !!room._v31SafeHaven,
+          cleared: !!room.cleared,
+          enemies: Array.isArray(room.enemies) ? room.enemies.length : null,
+          beacons: Array.isArray(room._v80Beacons) ? room._v80Beacons.length : null,
+          doors: Array.isArray(room._v80Doors) ? room._v80Doors.length : null,
+          coldLantern: !!room._v80ColdLantern
+        },
+        player: p && { hp: p.hp, x: p.x, y: p.y, hitInvuln: p.hitInvuln },
+        drownedSkyClears: drownedSkyClearsCount80(),
+        drownedSunDefeated: !!(save.defeatedBosses && save.defeatedBosses.drownedSun),
+        eclipsePulse: N(state._v80EclipsePulse),
+        stats: Object.assign({}, sys.stats),
+        v79: typeof state.v79Debug === 'function' ? state.v79Debug() : null
+      };
+    };
+    state.v80ForceEnter = function () {
+      try {
+        if (!state.level || !state.player) return { ok: false, reason: 'no level/player' };
+        if (!state._v80InDrownedSky) installDrownedSkyStage80();
+        return state.v80Debug();
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+    state.v80ForceKillBoss = function () {
+      try {
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room) return { ok: false, reason: 'no room' };
+        const boss = (room.enemies || []).find(function (e) { return e && e.typeId === 'v80DrownedSun' && !e.remove; });
+        if (!boss) return { ok: false, reason: 'no boss' };
+        boss.hp = 0;
+        if (typeof killEnemy === 'function') killEnemy(boss, null);
+        return state.v80Debug();
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+
+    // -----------------------------------------------------------------
+    // Install
+    // -----------------------------------------------------------------
+    try {
+      registerEnemies80();
+      tag80();
+      setTimeout(tag80, 0);
+      setTimeout(tag80, 350);
+      setTimeout(tag80, 1400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V80_DROWNED_SKY_STAGE__ = sys;
+        window.noMoonV80Debug = function () { return state.v80Debug(); };
+        window.noMoonV80ForceEnter = function () { return state.v80ForceEnter(); };
+        window.noMoonV80ForceKillBoss = function () { return state.v80ForceKillBoss(); };
+      }
+    } catch (e) { log80(e, 'install'); }
+    state.buildTag = V80_VERSION;
+  })();
+
+
   renderCodexStats();
 
 })();

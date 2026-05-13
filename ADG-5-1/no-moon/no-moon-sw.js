@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-drowned-sky-collapsed-sun-v79';
+const CACHE_NAME = 'no-moon-drowned-sky-stage-eclipse-trophy-v80';
 const ASSETS = [
   './',
   './index.html',
