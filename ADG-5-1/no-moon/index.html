@@ -43489,6 +43489,481 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v76 — Route Integrity + Useful Stars + Passenger Polish =======
+  // ===================================================================
+  (function installV76RouteStarsPassengers() {
+    const V76_VERSION = 'qual.route-integrity-stars-passengers.2026-05-13.v76';
+    const CACHE76 = 'no-moon-route-stars-passengers-v76';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v76RouteStarsPassengers && state.v76RouteStarsPassengers.installed) return;
+
+    const sys = state.v76RouteStarsPassengers = {
+      installed: true,
+      version: V76_VERSION,
+      cacheExpected: CACHE76,
+      stats: {
+        starlessWrongDrawsSuppressed: 0,
+        starlessCorrectDraws: 0,
+        starRerolls: 0,
+        starRerollDenied: 0,
+        bossLineFixed: 0,
+        ferryNamesPatched: 0,
+        passengerDescPatched: 0,
+        selectedBadgeSuppresses: 0,
+        cssInjected: 0,
+        lastError: null
+      }
+    };
+
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    const ROOM = () => { try { return typeof currentRoom === 'function' ? currentRoom() : null; } catch (_) { return null; } };
+    const R = (color, alpha) => { try { return rgba(color || '#fff', alpha); } catch (_) { return 'rgba(255,255,255,' + alpha + ')'; } };
+
+    function log76(e, where) {
+      const msg = (where || 'v76') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v76]', msg, e); } catch (_) {}
+    }
+
+    function tag76() {
+      try { state.buildTag = V76_VERSION; } catch (_) {}
+    }
+
+    // -----------------------------------------------------------------
+    // 1. Night Ferry / boss-name copy fix
+    //    The base bossDefeatLine returns 'THE GRAVEN WARDEN IS DEAD'
+    //    for any non-archon typeId. V23 added a falseMoon branch, V24.2
+    //    added a spiggot branch — but nothing handled v59NightFerry. So
+    //    when the sky-route boss dies, the canvas fillText at line
+    //    ~11393 paints 'THE GRAVEN WARDEN IS DEAD'. Wrap it.
+    // -----------------------------------------------------------------
+    function wrapBossNaming76() {
+      try {
+        if (typeof bossDefeatLine === 'function' && !bossDefeatLine.__v76FerryFix) {
+          const baseDefeat76 = bossDefeatLine;
+          bossDefeatLine = function bossDefeatLineV76(typeId) {
+            if (typeId === 'v59NightFerry') return 'THE NIGHT FERRY DROPS ANCHOR';
+            return baseDefeat76(typeId);
+          };
+          bossDefeatLine.__v76FerryFix = true;
+          sys.stats.ferryNamesPatched += 1;
+        }
+        if (typeof bossProperName === 'function' && !bossProperName.__v76FerryFix) {
+          const baseName76 = bossProperName;
+          bossProperName = function bossProperNameV76(typeId) {
+            if (typeId === 'v59NightFerry') return 'Night Ferry';
+            if (typeId === 'falseMoon') return 'False Moon';
+            if (typeId === 'spiggot') return 'Spiggot';
+            return baseName76(typeId);
+          };
+          bossProperName.__v76FerryFix = true;
+        }
+        if (typeof bossHonorific === 'function' && !bossHonorific.__v76FerryFix) {
+          const baseHon76 = bossHonorific;
+          bossHonorific = function bossHonorificV76(typeId) {
+            if (typeId === 'v59NightFerry') return 'Stowaway-on-the-Sky';
+            if (typeId === 'falseMoon') return 'Reflection-That-Lies';
+            if (typeId === 'spiggot') return 'Smirk-with-Teeth';
+            return baseHon76(typeId);
+          };
+          bossHonorific.__v76FerryFix = true;
+        }
+        sys.stats.bossLineFixed += 1;
+      } catch (e) { log76(e, 'wrapBossNaming'); }
+    }
+
+    // -----------------------------------------------------------------
+    // 2. Starless door world-space render fix
+    //    v71 wraps renderWorld and calls drawStarlessDoors71() AFTER
+    //    the base renderWorld restores its world-transform. Result: the
+    //    door art is drawn in screen space and visibly drifts with the
+    //    camera while collision still operates in world space.
+    //
+    //    Fix: in our outer wrapper, snapshot the doors before base
+    //    renderWorld runs (so v71's inner wrapper sees nothing to draw),
+    //    restore them after base render, and redraw under the correct
+    //    world transform ourselves.
+    // -----------------------------------------------------------------
+    function starlessDoorActive76(door, room) {
+      if (!door || door.active === false) return false;
+      if (door.needsCleared && room && !room.cleared) return false;
+      return true;
+    }
+
+    function drawStarlessDoor76(door, room) {
+      try {
+        const active = starlessDoorActive76(door, room);
+        const t = N(state.time);
+        const r = N(door.r, 42);
+        const alpha = active ? 1 : 0.28;
+        ctx.save();
+        ctx.translate(N(door.x), N(door.y));
+        ctx.globalCompositeOperation = 'screen';
+        if (door.commit) {
+          for (let i = 0; i < 5; i++) {
+            ctx.strokeStyle = R(i % 2 ? '#f6dcff' : '#bde7ff', alpha * (0.18 - i * 0.02));
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(0, Math.sin(t * 1.2 + i) * 4, r * (1 + i * 0.18), r * (0.36 + i * 0.06), 0, 0, TAU);
+            ctx.stroke();
+          }
+          const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.6);
+          grad.addColorStop(0, R('#dff6ff', active ? 0.34 : 0.09));
+          grad.addColorStop(0.34, R('#bde7ff', active ? 0.16 : 0.04));
+          grad.addColorStop(1, R('#000000', 0));
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, r * 1.15, r * 0.42, 0, 0, TAU);
+          ctx.fill();
+          ctx.strokeStyle = R('#dff6ff', alpha * 0.72);
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.26, 0, TAU);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = R('#02030a', 0.82 * alpha);
+          ctx.beginPath();
+          ctx.ellipse(0, 0, r * 1.04, r * 0.66, 0, 0, TAU);
+          ctx.fill();
+          ctx.strokeStyle = R('#bde7ff', 0.58 * alpha);
+          ctx.lineWidth = 2.8;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, r * 1.08, r * 0.70, 0, 0, TAU);
+          ctx.stroke();
+          ctx.strokeStyle = R('#f6dcff', 0.32 * alpha);
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.62, -Math.PI * 0.70, Math.PI * 0.70);
+          ctx.stroke();
+          for (let i = 0; i < 8; i++) {
+            const a = i * TAU / 8 + t * 0.45;
+            ctx.fillStyle = R(i % 2 ? '#f6dcff' : '#bde7ff', 0.22 * alpha);
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * r * 0.92, Math.sin(a) * r * 0.45, 2, 0, TAU);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      } catch (e) { log76(e, 'drawStarlessDoor76'); }
+    }
+
+    function wrapRenderWorld76() {
+      if (typeof renderWorld !== 'function' || renderWorld.__v76StarlessWorldSpace) return;
+      const baseRender76 = renderWorld;
+      renderWorld = function renderWorldV76() {
+        const room = ROOM();
+        const doors = room && Array.isArray(room._v71StarlessDoors) ? room._v71StarlessDoors : null;
+        if (doors && doors.length) {
+          room._v71StarlessDoors = [];
+          sys.stats.starlessWrongDrawsSuppressed += 1;
+        }
+        let out;
+        try { out = baseRender76.apply(this, arguments); }
+        finally { if (doors) room._v71StarlessDoors = doors; }
+        try {
+          if (doors && doors.length) {
+            ctx.save();
+            ctx.translate(-state.camera.x + playViewCenterX(), -state.camera.y + playViewCenterY());
+            for (const door of doors) drawStarlessDoor76(door, room);
+            ctx.restore();
+            sys.stats.starlessCorrectDraws += 1;
+          }
+        } catch (e) { log76(e, 'renderWorld76 doors'); }
+        return out;
+      };
+      renderWorld.__v76StarlessWorldSpace = true;
+    }
+
+    // -----------------------------------------------------------------
+    // 3. Star reroll widget on the draft UI
+    //    Stars (moonSplinters) used to feed the v57 market; v60-v75
+    //    hid that market. The simplest useful return: one button on
+    //    the draft that rerolls the offered grafts. Cost escalates
+    //    inside a single draft so spamming gets expensive.
+    // -----------------------------------------------------------------
+    function stars76() {
+      const p = state.player;
+      return p ? Math.max(0, Math.floor(N(p.moonSplinters))) : 0;
+    }
+    function rerollCost76() {
+      const d = state.draft;
+      const used = d ? Math.floor(N(d._v76StarRerolls)) : 0;
+      return Math.max(3, 5 + used * 3);
+    }
+    function chooseNewDraftCards76(count, oldCards) {
+      const oldKey = (oldCards || []).slice().sort().join('|');
+      for (let i = 0; i < 8; i++) {
+        const next = typeof chooseRandomItems === 'function' ? chooseRandomItems(count) : [];
+        if (!next || !next.length) continue;
+        if (next.slice().sort().join('|') !== oldKey) return next;
+      }
+      return typeof chooseRandomItems === 'function' ? chooseRandomItems(count) : oldCards;
+    }
+    function rerollDraftForStars76() {
+      try {
+        const d = state.draft;
+        const p = state.player;
+        if (!p || !d || !d.active || d.resolved) return false;
+        const cost = rerollCost76();
+        if (stars76() < cost) { sys.stats.starRerollDenied += 1; return false; }
+        const oldCards = Array.isArray(d.cards) ? d.cards.slice() : [];
+        const count = Math.max(3, Math.min(4, oldCards.length || 3));
+        const next = chooseNewDraftCards76(count, oldCards);
+        if (!next || !next.length) return false;
+        p.moonSplinters = stars76() - cost;
+        d.cards = next;
+        d._v76StarRerolls = Math.floor(N(d._v76StarRerolls)) + 1;
+        d.renderKey = '';
+        sys.stats.starRerolls += 1;
+        try {
+          if (typeof spawnRing === 'function') spawnRing(p.x, p.y, '#d9d4ff', 64);
+          if (typeof spawnSpark === 'function') spawnSpark(p.x, p.y, '#f3dcff', 8, 120);
+          if (typeof playToneBurst === 'function') playToneBurst({ type: 'sine', startFreq: 520, endFreq: 760, duration: 0.22, gain: 0.05, filterFreq: 2200 });
+        } catch (_) {}
+        try { renderDraftUI(true); } catch (_) {}
+        return true;
+      } catch (e) { log76(e, 'rerollDraftForStars'); return false; }
+    }
+    function injectStarTradeCss76() {
+      try {
+        if (document.getElementById('v76-star-trade-css')) return;
+        const st = document.createElement('style');
+        st.id = 'v76-star-trade-css';
+        st.textContent = ''
+          + '#v76StarTrade{margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:14px;border:1px solid rgba(217,212,255,.20);background:linear-gradient(180deg,rgba(12,14,24,.74),rgba(5,7,13,.62));box-shadow:inset 0 1px 0 rgba(255,255,255,.04);color:rgba(241,239,255,.88);font:900 12px Inter,system-ui,sans-serif;}'
+          + '#v76StarTrade .v76Stars{letter-spacing:.05em;text-transform:uppercase;color:rgba(230,236,255,.82);white-space:nowrap;}'
+          + '#v76StarTrade button{border:1px solid rgba(217,212,255,.26);border-radius:999px;padding:8px 14px;color:#f7f3ff;background:linear-gradient(180deg,rgba(50,43,78,.84),rgba(17,18,32,.88));font:900 12px Inter,system-ui,sans-serif;cursor:pointer;box-shadow:0 8px 22px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.05);letter-spacing:.04em;}'
+          + '#v76StarTrade button:disabled{opacity:.42;cursor:not-allowed;filter:saturate(.72);}'
+          + '#v76StarTrade.v76Spent{animation:v76StarPulse 420ms ease-out 1;}'
+          + '@keyframes v76StarPulse{0%{box-shadow:0 0 0 rgba(217,212,255,0),inset 0 1px 0 rgba(255,255,255,.04);}40%{box-shadow:0 0 26px rgba(217,212,255,.30),inset 0 1px 0 rgba(255,255,255,.08);}100%{box-shadow:0 0 0 rgba(217,212,255,0),inset 0 1px 0 rgba(255,255,255,.04);}}'
+          + '@media(max-width:720px){#v76StarTrade{padding:8px;border-radius:12px;}#v76StarTrade button{padding:8px 12px;font-size:11px;}}';
+        document.head.appendChild(st);
+        sys.stats.cssInjected += 1;
+      } catch (e) { log76(e, 'injectStarTradeCss'); }
+    }
+    function renderStarTrade76() {
+      try {
+        if (!draftUI || !draftCards) return;
+        if (!state.draft || !state.draft.active || state.draft.resolved) {
+          const old = document.getElementById('v76StarTrade');
+          if (old) old.remove();
+          return;
+        }
+        injectStarTradeCss76();
+        let el = document.getElementById('v76StarTrade');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'v76StarTrade';
+          draftCards.insertAdjacentElement('afterend', el);
+        }
+        const stars = stars76();
+        const cost = rerollCost76();
+        el.innerHTML = ''
+          + '<div class="v76Stars">★ ' + stars + '</div>'
+          + '<button type="button" data-v76-star-action="reroll"' + (stars < cost ? ' disabled' : '') + '>Reroll grafts — ' + cost + '★</button>';
+      } catch (e) { log76(e, 'renderStarTrade'); }
+    }
+    function wrapDraftRender76() {
+      if (typeof renderDraftUI !== 'function' || renderDraftUI.__v76StarTrade) return;
+      const baseDraft76 = renderDraftUI;
+      renderDraftUI = function renderDraftUIV76(force) {
+        const out = baseDraft76.apply(this, arguments);
+        try { renderStarTrade76(); } catch (e) { log76(e, 'renderDraftUIV76'); }
+        return out;
+      };
+      renderDraftUI.__v76StarTrade = true;
+    }
+    function bindStarTradeClicks76() {
+      if (!draftUI || draftUI.__v76StarTradeEvents) return;
+      const handler = function (e) {
+        const btn = e.target && e.target.closest && e.target.closest('[data-v76-star-action="reroll"]');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.disabled) return;
+        const el = document.getElementById('v76StarTrade');
+        const ok = rerollDraftForStars76();
+        if (ok && el) {
+          el.classList.remove('v76Spent');
+          void el.offsetWidth;
+          el.classList.add('v76Spent');
+        }
+      };
+      draftUI.addEventListener('pointerdown', function (e) {
+        if (e.target && e.target.closest && e.target.closest('[data-v76-star-action="reroll"]')) {
+          e.preventDefault(); e.stopPropagation();
+        }
+      }, true);
+      draftUI.addEventListener('click', handler, true);
+      draftUI.__v76StarTradeEvents = true;
+    }
+
+    // -----------------------------------------------------------------
+    // 4. Passenger polish
+    //    a) Suppress the v66 ::after 'SELECTED' badge that overlaps the
+    //       Moots/Vesper name on the select card. Replace with a glow.
+    //    b) Rewrite Moots/Vesper descriptions to give them a reason for
+    //       leaving Safe Haven (the user asked for story-flavored copy).
+    //    c) Point both portrait paths at the new art (already shipped
+    //       at assets/no-moon/characters/{moots,vesper}-portrait.webp).
+    // -----------------------------------------------------------------
+    function injectPassengerCss76() {
+      try {
+        if (document.getElementById('v76-passenger-polish-css')) return;
+        const st = document.createElement('style');
+        st.id = 'v76-passenger-polish-css';
+        st.textContent = ''
+          + '#overlay.v66TitleSelect .card.selected::after{content:none!important;display:none!important;}'
+          + '#overlay.v66TitleSelect .card.selected{border-color:rgba(189,231,255,.62)!important;box-shadow:0 0 0 2px rgba(189,231,255,.30),0 0 30px rgba(189,231,255,.20),inset 0 1px 0 rgba(255,255,255,.08)!important;}'
+          + '#overlay.v66TitleSelect .cardName{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}'
+          + '#overlay.v66TitleSelect .charArtFigure img{width:100%;height:100%;object-fit:contain;object-position:center center;}'
+          + '#overlay.v66TitleSelect .card[data-char="moots"] .cardDesc,#overlay.v66TitleSelect .card[data-char="vesper"] .cardDesc{line-height:1.32;}';
+        document.head.appendChild(st);
+        sys.stats.selectedBadgeSuppresses += 1;
+        sys.stats.cssInjected += 1;
+      } catch (e) { log76(e, 'injectPassengerCss'); }
+    }
+    function patchPassengers76() {
+      try {
+        if (typeof CHARACTERS === 'undefined' || !Array.isArray(CHARACTERS)) return;
+        const moots = CHARACTERS.find(c => c && c.id === 'moots');
+        if (moots) {
+          moots.desc = 'Left Safe Haven convinced fate was a habit, not a law. Carries the Boon Moots — pay the room and watch the offer rewrite itself.';
+          moots.tags = ['Reroll active', 'Twin fire', 'Fate cheat'];
+          moots.unlockHint = 'Clear the regular route once.';
+          if (moots.visual) moots.visual.art = '../assets/no-moon/characters/moots-portrait.webp';
+          if (moots.visualV63) moots.visualV63.art = '../assets/no-moon/characters/moots-portrait.webp';
+        }
+        const vesper = CHARACTERS.find(c => c && c.id === 'vesper');
+        if (vesper) {
+          vesper.desc = 'Stepped off the Night Ferry with a ticket the elders swore did not exist. Fast, narrow, and built for the route nobody is supposed to know.';
+          vesper.tags = ['Needle fire', 'Ferry ticket', 'Stolen route'];
+          vesper.unlockHint = 'Defeat the Night Ferry.';
+          if (vesper.visual) vesper.visual.art = '../assets/no-moon/characters/vesper-portrait.webp';
+          if (vesper.visualV63) vesper.visualV63.art = '../assets/no-moon/characters/vesper-portrait.webp';
+        }
+        sys.stats.passengerDescPatched += 1;
+      } catch (e) { log76(e, 'patchPassengers'); }
+    }
+    function wrapPassengerRenders76() {
+      try {
+        if (typeof renderCharacterCards === 'function' && !renderCharacterCards.__v76PassengerPolish) {
+          const baseCards76 = renderCharacterCards;
+          renderCharacterCards = function renderCharacterCardsV76() {
+            try { patchPassengers76(); } catch (_) {}
+            const out = baseCards76.apply(this, arguments);
+            try { injectPassengerCss76(); } catch (_) {}
+            return out;
+          };
+          renderCharacterCards.__v76PassengerPolish = true;
+        }
+        if (typeof updateOverlay === 'function' && !updateOverlay.__v76PassengerPolish) {
+          const baseUpdate76 = updateOverlay;
+          updateOverlay = function updateOverlayV76() {
+            const out = baseUpdate76.apply(this, arguments);
+            try { injectPassengerCss76(); } catch (_) {}
+            return out;
+          };
+          updateOverlay.__v76PassengerPolish = true;
+        }
+      } catch (e) { log76(e, 'wrapPassengerRenders'); }
+    }
+
+    // -----------------------------------------------------------------
+    // 5. Sol/Mire diagnose helper
+    //    The user reports the 'Begin again as Sol' button appearing,
+    //    then a Mire reference in the first room. Could be a real
+    //    template mismatch, could be a floor-condition Mire-flavored
+    //    line. Don't blind-patch — add a debug helper to capture the
+    //    state so the next playtest gives a definitive answer.
+    // -----------------------------------------------------------------
+    state.v76Debug = function v76Debug() {
+      const room = ROOM();
+      let roomLabel = null;
+      try { roomLabel = typeof roomKindLabel === 'function' && room ? roomKindLabel(room) : (room && room.kind) || null; } catch (_) {}
+      const lastMessages = (function () {
+        try {
+          return (state.messages || []).slice(-12).map(m => ({
+            text: String(m && m.text || ''),
+            color: m && m.color,
+            time: m && m.time
+          }));
+        } catch (_) { return []; }
+      })();
+      return {
+        version: V76_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE76,
+        selectedCharId: state.selectedCharId,
+        saveSelectedCharId: state.save && state.save.selectedCharId,
+        playerTemplate: state.player && state.player.template && {
+          id: state.player.template.id,
+          name: state.player.template.name,
+          title: state.player.template.title
+        },
+        overlay: {
+          mode: state.overlayMode,
+          startButton: typeof startBtn !== 'undefined' && startBtn ? startBtn.textContent : null
+        },
+        room: room && {
+          id: room.id,
+          kind: room.kind,
+          label: roomLabel,
+          starlessLabel: room._v71StarlessLabel || null,
+          starlessDoorCount: Array.isArray(room._v71StarlessDoors) ? room._v71StarlessDoors.length : 0
+        },
+        level: state.level && {
+          index: state.level.index,
+          biome: state.level.biome && { id: state.level.biome.id, name: state.level.biome.name },
+          contract: state.level._v27Identity || null
+        },
+        draft: state.draft && {
+          active: !!state.draft.active,
+          resolved: !!state.draft.resolved,
+          cards: Array.isArray(state.draft.cards) ? state.draft.cards.slice() : [],
+          v76StarRerolls: state.draft._v76StarRerolls || 0
+        },
+        stars: stars76(),
+        messages: lastMessages,
+        stats: Object.assign({}, sys.stats),
+        v75: typeof state.v75Debug === 'function' ? state.v75Debug() : null
+      };
+    };
+    state.v76GrantStars = function (n) {
+      if (!state.player) return { ok: false, reason: 'no player' };
+      const add = Math.max(0, Math.floor(N(n, 20)));
+      state.player.moonSplinters = Math.max(0, Math.floor(N(state.player.moonSplinters))) + add;
+      try { renderDraftUI(true); } catch (_) {}
+      return { ok: true, stars: state.player.moonSplinters };
+    };
+
+    // -----------------------------------------------------------------
+    // Install
+    // -----------------------------------------------------------------
+    try {
+      wrapBossNaming76();
+      wrapRenderWorld76();
+      injectStarTradeCss76();
+      wrapDraftRender76();
+      bindStarTradeClicks76();
+      injectPassengerCss76();
+      patchPassengers76();
+      wrapPassengerRenders76();
+      tag76();
+      if (typeof renderCharacterCards === 'function') {
+        try { renderCharacterCards(); } catch (_) {}
+      }
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V76_ROUTE_STARS_PASSENGERS__ = sys;
+        window.noMoonV76Debug = function () { return state.v76Debug(); };
+        window.noMoonV76GrantStars = function (n) { return state.v76GrantStars(n); };
+      }
+    } catch (e) { log76(e, 'install'); }
+    state.buildTag = V76_VERSION;
+  })();
+
+
   renderCodexStats();
 
 })();

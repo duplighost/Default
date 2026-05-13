@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-final-master-merge-v75';
+const CACHE_NAME = 'no-moon-route-stars-passengers-v76';
 const ASSETS = [
   './',
   './index.html',
