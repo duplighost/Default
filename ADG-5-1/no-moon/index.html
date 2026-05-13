@@ -953,7 +953,6 @@
 <button id="musicToggle" type="button" aria-label="Toggle background music" data-on="0">BGM OFF</button>
 
 <script>
-
 (() => {
   'use strict';
 
@@ -2945,9 +2944,13 @@ let hudMenuOpen = false;
     return null;
   }
 
+  function isStarterCharacterId(id) {
+    return id === 'rook' || id === 'nyx' || id === 'sol' || id === 'mire';
+  }
+
   function makeDefaultSave() {
     const unlocked = Object.create(null);
-    for (const ch of CHARACTERS) unlocked[ch.id] = ch.id === 'moots' ? false : true;
+    for (const ch of CHARACTERS) unlocked[ch.id] = isStarterCharacterId(ch.id);
     const achievements = Object.create(null);
     for (const def of ACHIEVEMENT_DEFS) {
       achievements[def.id] = { unlocked: false, progress: 0, goal: def.goal };
@@ -3039,7 +3042,7 @@ let hudMenuOpen = false;
         const mootsWon = !!(save.lifetime && save.lifetime.wins > 0) || !!(save.victories && save.victories.routeClears > 0) || !!(save.achievements && save.achievements.wins_1 && save.achievements.wins_1.unlocked);
         if (typeof save.unlockedCharacters[ch.id] !== 'boolean') save.unlockedCharacters[ch.id] = mootsWon;
         else save.unlockedCharacters[ch.id] = !!save.unlockedCharacters[ch.id] || mootsWon;
-      } else if (typeof save.unlockedCharacters[ch.id] !== 'boolean') save.unlockedCharacters[ch.id] = true;
+      } else if (typeof save.unlockedCharacters[ch.id] !== 'boolean') save.unlockedCharacters[ch.id] = isStarterCharacterId(ch.id);
     }
     if (save.selectedCharId === 'moots' && !save.unlockedCharacters.moots) save.selectedCharId = CHARACTERS[0].id;
     refreshAchievementProgress(false);
@@ -5858,6 +5861,9 @@ document.addEventListener('pointerdown', (ev) => {
       shrapnel: options.shrapnel || 0,
       gen: options.gen || 0,
       source: options.source || 'base',
+      sourceEnemyType: options.sourceEnemyType || options.enemyType || '',
+      bossSource: !!options.bossSource,
+      majorHazard: !!options.majorHazard,
       remove: false
     });
   }
@@ -5978,6 +5984,8 @@ document.addEventListener('pointerdown', (ev) => {
   }
 
   function fireEnemyBurst(enemy, count, spread, speed, life = 3.0, damage = 1, radius = 5, color = enemy.color) {
+    const sourceEnemyType = enemy && (enemy.typeId || enemy.behavior || enemy.id || '');
+    const bossSource = !!(enemy && (enemy.boss || /^(warden|archon|sunCore|v59NightFerry|falseMoon|v79DrownedSun|v80DrownedSun)$/.test(String(sourceEnemyType)) || (typeof state !== 'undefined' && state.v77IsMajorBoss && state.v77IsMajorBoss(enemy))));
     const toP = normalize(state.player.x - enemy.x, state.player.y - enemy.y);
     const baseA = Math.atan2(toP.y, toP.x);
     for (let i = 0; i < count; i++) {
@@ -5992,12 +6000,16 @@ document.addEventListener('pointerdown', (ev) => {
         r: radius,
         life,
         damage,
-        color
+        color,
+        sourceEnemyType,
+        bossSource
       });
     }
   }
 
   function fireEnemyRing(enemy, count, speed, life = 3.6, damage = 1, radius = 5.4, color = enemy.color, offset = enemy.seed * 0.03) {
+    const sourceEnemyType = enemy && (enemy.typeId || enemy.behavior || enemy.id || '');
+    const bossSource = !!(enemy && (enemy.boss || /^(warden|archon|sunCore|v59NightFerry|falseMoon|v79DrownedSun|v80DrownedSun)$/.test(String(sourceEnemyType)) || (typeof state !== 'undefined' && state.v77IsMajorBoss && state.v77IsMajorBoss(enemy))));
     for (let i = 0; i < count; i++) {
       const a = (i / count) * TAU + offset;
       createBullet({
@@ -6009,7 +6021,9 @@ document.addEventListener('pointerdown', (ev) => {
         r: radius,
         life,
         damage,
-        color
+        color,
+        sourceEnemyType,
+        bossSource
       });
     }
   }
@@ -18095,7 +18109,9 @@ function drawHudBossMiniStats(p, layout) {
               r: 5.2,
               life: 3.2,
               damage: 1,
-              color: '#ffd2d2'
+              color: '#ffd2d2',
+              sourceEnemyType: 'falseMoon',
+              bossSource: true
             });
           }
         }
@@ -48179,7 +48195,7 @@ function drawHudBossMiniStats(p, layout) {
         MOBILE_SPARK_HALF: true,
         MOBILE_RING_LIMIT: 4
       },
-      anchor: { charges: 1, maxCharges: 1, roomProgress: 0, cooldown: 0, useFlash: 0, hitbox: null },
+      anchor: { charges: 0, maxCharges: 1, roomProgress: 0, cooldown: 0, useFlash: 0, hitbox: null },
       stats: {
         uses: 0,
         anchorsExpired: 0,
@@ -48337,18 +48353,28 @@ function drawHudBossMiniStats(p, layout) {
       try {
         if (state.mode !== 'play') return;
         const room = (typeof currentRoom === 'function') ? currentRoom() : null;
-        if (!room || !Array.isArray(room._v82BlackAnchors) || !room._v82BlackAnchors.length) return;
         const enemies = state.enemies || [];
         const bullets = state.bullets || [];
+        const frameToken = (sys._anchorSlowFrameToken = (N(sys._anchorSlowFrameToken) + 1) || 1);
+        for (const b of bullets) {
+          if (!b || b.owner !== 'enemy' || b._v82AnchorBaseVx === undefined) continue;
+          b._v82AnchorTouchedFrame = -1;
+          b._v82AnchorFrameFactor = 1;
+        }
+        if (!room || !Array.isArray(room._v82BlackAnchors) || !room._v82BlackAnchors.length) {
+          restoreAnchorSlowedBullets82(bullets, frameToken);
+          return;
+        }
         for (const a of room._v82BlackAnchors) {
           if (!a) continue;
           a.t += dt;
           if (!a.collapsed) {
             a.life -= dt;
-            // Slow enemy bullets in radius
+            // Slow enemy bullets in radius without permanently draining velocity.
+            // v82 originally multiplied vx/vy every frame, which could freeze bullets.
             for (const b of bullets) {
               if (!b || b.owner !== 'enemy') continue;
-              if (b.bossBeam || b.sunRay || b.majorHazard) continue;
+              if (b.bossBeam || b.sunRay || b.majorHazard || b.bossSource || b.sourceBoss) continue;
               if (b.r && b.r > 12) continue;
               const dx = b.x - a.x, dy = b.y - a.y;
               const d = Math.hypot(dx, dy);
@@ -48356,8 +48382,14 @@ function drawHudBossMiniStats(p, layout) {
                 const slow = 1 - N(sys.config.SLOW_MAX, 0.34) * (1 - d / a.r);
                 const floor = N(sys.config.SLOW_FLOOR, 0.70);
                 const factor = Math.max(floor, slow);
-                b.vx *= factor;
-                b.vy *= factor;
+                if (b._v82AnchorBaseVx === undefined || b._v82AnchorBaseVy === undefined) {
+                  b._v82AnchorBaseVx = N(b.vx);
+                  b._v82AnchorBaseVy = N(b.vy);
+                }
+                b._v82AnchorTouchedFrame = frameToken;
+                b._v82AnchorFrameFactor = Math.min(N(b._v82AnchorFrameFactor, 1), factor);
+                b.vx = N(b._v82AnchorBaseVx) * b._v82AnchorFrameFactor;
+                b.vy = N(b._v82AnchorBaseVy) * b._v82AnchorFrameFactor;
                 sys.stats.bulletsSlowed += 1;
               }
             }
@@ -48391,9 +48423,30 @@ function drawHudBossMiniStats(p, layout) {
             a.collapseHold -= dt;
           }
         }
+        restoreAnchorSlowedBullets82(bullets, frameToken);
         // GC collapsed anchors after their post-collapse hold expires
         room._v82BlackAnchors = room._v82BlackAnchors.filter(a => !a.collapsed || a.collapseHold > -0.05);
       } catch (e) { log82(e, 'tickAnchors'); }
+    }
+
+    function restoreAnchorSlowedBullets82(bullets, frameToken) {
+      try {
+        for (const b of bullets || []) {
+          if (!b || b._v82AnchorBaseVx === undefined || b._v82AnchorBaseVy === undefined) continue;
+          if (b._v82AnchorTouchedFrame === frameToken) {
+            const factor = Math.max(N(sys.config.SLOW_FLOOR, 0.70), Math.min(1, N(b._v82AnchorFrameFactor, 1)));
+            b.vx = N(b._v82AnchorBaseVx) * factor;
+            b.vy = N(b._v82AnchorBaseVy) * factor;
+          } else {
+            b.vx = N(b._v82AnchorBaseVx);
+            b.vy = N(b._v82AnchorBaseVy);
+            delete b._v82AnchorBaseVx;
+            delete b._v82AnchorBaseVy;
+            delete b._v82AnchorTouchedFrame;
+            delete b._v82AnchorFrameFactor;
+          }
+        }
+      } catch (e) { log82(e, 'restoreAnchorSlowedBullets'); }
     }
 
     // -----------------------------------------------------------------
@@ -48783,10 +48836,184 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v83 — Pro hardening: unlock hygiene + anchor correctness ======
+  // ===================================================================
+  (function installV83ProHardening() {
+    const V83_VERSION = 'qual.pro-hardening-anchor-unlock.2026-05-13.v83';
+    const CACHE83 = 'no-moon-pro-hardening-anchor-unlock-v83';
+    const STARTERS83 = { rook: true, nyx: true, sol: true, mire: true };
+    const NADIR83 = 'nadir';
+    const MIRROR83 = 'noMoonProgress_v68';
+    const SAVE83 = (typeof SAVE_KEY !== 'undefined') ? SAVE_KEY : 'noMoonSave_v1';
+    const sys = state.v83ProHardening = state.v83ProHardening || {
+      stats: {
+        saveScrubs: 0,
+        mirrorScrubs: 0,
+        defaultUnlockRepairs: 0,
+        titleAnchorResets: 0,
+        pointerSwallows: 0,
+        lastError: null
+      }
+    };
+    function log83(e, where) {
+      const msg = (where || 'v83') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v83]', msg, e); } catch (_) {}
+    }
+    function tag83() { try { state.buildTag = V83_VERSION; } catch (_) {} }
+    function n83(v, fallback) { const x = Number(v); return Number.isFinite(x) ? x : (fallback || 0); }
+    function readJson83(key) { try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) || {}) : {}; } catch (_) { return {}; } }
+    function writeJson83(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (_) { return false; } }
+    function nadirStrict83(obj) {
+      try {
+        const db = (obj && obj.defeatedBosses) || {};
+        const v = (obj && obj.victories) || {};
+        return !!db.drownedSun || n83(v.drownedSkyClears) > 0 || n83(v.drownedSunClears) > 0;
+      } catch (_) { return false; }
+    }
+    function normalizeDefaultUnlocks83(save) {
+      try {
+        if (!save || !save.unlockedCharacters) return false;
+        let changed = false;
+        for (const id in save.unlockedCharacters) {
+          if (STARTERS83[id]) continue;
+          if (id === 'moots') continue;
+          if (id === 'vesper') continue;
+          if (id === NADIR83) continue;
+          // Unknown future passengers should never be granted just because they exist.
+          if (save.unlockedCharacters[id] === true) {
+            save.unlockedCharacters[id] = false;
+            changed = true;
+            sys.stats.defaultUnlockRepairs += 1;
+          }
+        }
+        return changed;
+      } catch (e) { log83(e, 'normalizeDefaultUnlocks'); return false; }
+    }
+    function scrubNadir83() {
+      try {
+        let changed = false;
+        const save = state.save || null;
+        const mirror = readJson83(MIRROR83);
+        const strict = nadirStrict83(save) || nadirStrict83(mirror);
+        if (save) {
+          save.unlockedCharacters = save.unlockedCharacters || {};
+          changed = normalizeDefaultUnlocks83(save) || changed;
+          if (!strict && save.unlockedCharacters[NADIR83]) {
+            save.unlockedCharacters[NADIR83] = false;
+            sys.stats.saveScrubs += 1;
+            changed = true;
+          }
+          if (strict && !save.unlockedCharacters[NADIR83]) {
+            save.unlockedCharacters[NADIR83] = true;
+            changed = true;
+          }
+        }
+        mirror.unlockedCharacters = mirror.unlockedCharacters || {};
+        if (!strict && mirror.unlockedCharacters[NADIR83]) {
+          mirror.unlockedCharacters[NADIR83] = false;
+          sys.stats.mirrorScrubs += 1;
+          writeJson83(MIRROR83, mirror);
+        } else if (strict && !mirror.unlockedCharacters[NADIR83]) {
+          mirror.unlockedCharacters[NADIR83] = true;
+          writeJson83(MIRROR83, mirror);
+        }
+        if (changed) writeJson83(SAVE83, save);
+        return { strict, changed };
+      } catch (e) { log83(e, 'scrubNadir'); return { strict: false, changed: false, error: String(e && e.message || e) }; }
+    }
+    function resetTitleAnchor83() {
+      try {
+        const anchorSys = (typeof window !== 'undefined') && window.__NO_MOON_V82_BLACK_ANCHOR__;
+        if (!anchorSys || !anchorSys.anchor) return false;
+        const isNadir = !!(state.player && state.player.template && state.player.template.id === NADIR83 && state.mode === 'play');
+        if (!isNadir && anchorSys.anchor.charges !== 0) {
+          anchorSys.anchor.charges = 0;
+          anchorSys.anchor.roomProgress = 0;
+          anchorSys.anchor.cooldown = 0;
+          anchorSys.anchor.useFlash = 0;
+          sys.stats.titleAnchorResets += 1;
+          return true;
+        }
+        return false;
+      } catch (e) { log83(e, 'resetTitleAnchor'); return false; }
+    }
+    if (typeof safeWriteSave === 'function' && !safeWriteSave.__v83ProHardening) {
+      const baseSafeWrite83 = safeWriteSave;
+      safeWriteSave = function safeWriteSaveV83() {
+        const out = baseSafeWrite83.apply(this, arguments);
+        try { scrubNadir83(); } catch (e) { log83(e, 'postSafeWrite'); }
+        return out;
+      };
+      safeWriteSave.__v83ProHardening = true;
+    }
+    if (typeof loadSave === 'function' && !loadSave.__v83ProHardening) {
+      const baseLoadSave83 = loadSave;
+      loadSave = function loadSaveV83() {
+        const out = baseLoadSave83.apply(this, arguments);
+        try {
+          if (out && out.unlockedCharacters) {
+            normalizeDefaultUnlocks83(out);
+            if (!nadirStrict83(out) && out.unlockedCharacters[NADIR83]) {
+              out.unlockedCharacters[NADIR83] = false;
+              sys.stats.saveScrubs += 1;
+            }
+          }
+        } catch (e) { log83(e, 'loadSave'); }
+        return out;
+      };
+      loadSave.__v83ProHardening = true;
+    }
+    // Swallow taps on the active slot even while it is empty/cooling, so mobile UI never fires through the HUD.
+    if (typeof canvas !== 'undefined' && canvas && !canvas.__v83ActiveSlotSwallow) {
+      canvas.addEventListener('pointerdown', function (ev) {
+        try {
+          const dbg = (typeof window !== 'undefined' && typeof window.noMoonV82Debug === 'function') ? window.noMoonV82Debug() : null;
+          const b = dbg && dbg.anchor && dbg.anchor.hitbox;
+          if (!dbg || !dbg.anchorActive || !b) return;
+          const rect = canvas.getBoundingClientRect();
+          const x = (ev.clientX - rect.left) * (canvas.width / (typeof DPR !== 'undefined' ? DPR : 1)) / Math.max(1, rect.width);
+          const y = (ev.clientY - rect.top) * (canvas.height / (typeof DPR !== 'undefined' ? DPR : 1)) / Math.max(1, rect.height);
+          if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+            sys.stats.pointerSwallows += 1;
+            try { if (typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (_) {}
+            try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); else if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch (_) {}
+          }
+        } catch (e) { log83(e, 'slotSwallow'); }
+      }, { capture: true, passive: false });
+      canvas.__v83ActiveSlotSwallow = true;
+    }
+    state.v83Debug = function v83Debug() {
+      try { tag83(); } catch (_) {}
+      return {
+        version: V83_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE83,
+        strictNadir: scrubNadir83().strict,
+        saveNadir: !!(state.save && state.save.unlockedCharacters && state.save.unlockedCharacters[NADIR83]),
+        mirrorNadir: !!(readJson83(MIRROR83).unlockedCharacters && readJson83(MIRROR83).unlockedCharacters[NADIR83]),
+        anchorTitleReset: resetTitleAnchor83(),
+        stats: Object.assign({}, sys.stats),
+        v82: typeof state.v82Debug === 'function' ? state.v82Debug() : null
+      };
+    };
+    try {
+      scrubNadir83();
+      resetTitleAnchor83();
+      tag83();
+      setTimeout(function () { try { scrubNadir83(); resetTitleAnchor83(); tag83(); } catch (_) {} }, 0);
+      setTimeout(function () { try { scrubNadir83(); resetTitleAnchor83(); tag83(); } catch (_) {} }, 350);
+      setTimeout(function () { try { scrubNadir83(); resetTitleAnchor83(); tag83(); } catch (_) {} }, 1400);
+      if (typeof window !== 'undefined') window.noMoonV83Debug = function () { return state.v83Debug(); };
+    } catch (e) { log83(e, 'install'); }
+  })();
+
+
+
   renderCodexStats();
 
 })();
-
 </script>
 </body>
 </html>

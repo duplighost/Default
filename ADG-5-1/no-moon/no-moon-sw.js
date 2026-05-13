@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-nadir-black-anchor-active-v82';
+const CACHE_NAME = 'no-moon-pro-hardening-anchor-unlock-v83';
 const ASSETS = [
   './',
   './index.html',
