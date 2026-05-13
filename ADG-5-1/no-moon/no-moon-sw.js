@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-claude-followup-bugfixes-v84';
+const CACHE_NAME = 'no-moon-recovery-from-v88-codex-loop-v89';
 const ASSETS = [
   './',
   './index.html',

@@ -4909,6 +4909,9 @@ document.addEventListener('pointerdown', (ev) => {
       source: options.source || 'base',
       sourceEnemyType: options.sourceEnemyType || options.enemyType || '',
       bossSource: !!options.bossSource,
+      sourceBoss: !!options.sourceBoss,
+      bossBeam: !!options.bossBeam,
+      sunRay: !!options.sunRay,
       majorHazard: !!options.majorHazard,
       remove: false
     });
@@ -34206,7 +34209,10 @@ function drawHudBossMiniStats(p, layout) {
     if (draftUI && !draftUI.__v57StarMarketEvents) {
       draftUI.addEventListener('pointerdown', (e) => {
         const btn = e.target && e.target.closest ? e.target.closest('[data-v57-action]') : null;
-        if (btn) { e.preventDefault(); e.stopPropagation(); }
+        // v85: do not preventDefault on pointerdown for real buttons; that can
+        // cancel the synthetic click. Stop propagation is enough to keep the
+        // draft-card picker underneath from seeing the press.
+        if (btn) { e.stopPropagation(); }
       });
       draftUI.addEventListener('click', (e) => {
         const btn = e.target && e.target.closest ? e.target.closest('[data-v57-action]') : null;
@@ -42472,7 +42478,7 @@ function drawHudBossMiniStats(p, layout) {
         const mv = isObj(m.victories) ? m.victories : {};
         const ml = isObj(m.lifetime) ? m.lifetime : {};
         if (id === 'vesper') return !!(s.unlockedCharacters.vesper || s.defeatedBosses.nightFerry || num(s.victories.skyBranchClears) > 0 || mu.vesper || md.nightFerry || num(mv.skyBranchClears) > 0);
-        if (id === 'moots') return !!(s.unlockedCharacters.moots || num(s.victories.routeClears) > 0 || num(s.lifetime.wins) > 0 || num(s.highestBiomeReached) >= 10 || mu.moots || num(mv.routeClears) > 0 || num(ml.wins) > 0 || num(m.highestBiomeReached) >= 10);
+        if (id === 'moots') return !!(s.unlockedCharacters.moots || num(s.victories.routeClears) > 0 || num(s.lifetime.wins) > 0 || mu.moots || num(mv.routeClears) > 0 || num(ml.wins) > 0);
         return charExists75(id);
       } catch(_) { return id !== 'moots' && id !== 'vesper'; }
     }
@@ -42911,13 +42917,26 @@ function drawHudBossMiniStats(p, layout) {
       return Math.max(3, 5 + used * 3);
     }
     function chooseNewDraftCards76(count, oldCards) {
-      const oldKey = (oldCards || []).slice().sort().join('|');
-      for (let i = 0; i < 8; i++) {
+      const old = Array.isArray(oldCards) ? oldCards.slice() : [];
+      const oldKey = old.slice().sort().join('|');
+      const oldSet = new Set(old);
+      for (let i = 0; i < 16; i++) {
         const next = typeof chooseRandomItems === 'function' ? chooseRandomItems(count) : [];
         if (!next || !next.length) continue;
         if (next.slice().sort().join('|') !== oldKey) return next;
       }
-      return typeof chooseRandomItems === 'function' ? chooseRandomItems(count) : oldCards;
+      try {
+        const pool = (typeof ITEM_POOL !== 'undefined' && Array.isArray(ITEM_POOL))
+          ? ITEM_POOL.filter(item => item && item.id && (typeof ITEM_BY_ID === 'undefined' || ITEM_BY_ID[item.id]) && (typeof itemAvailableForDraft !== 'function' || itemAvailableForDraft(item))).map(item => item.id)
+          : [];
+        const fresh = pool.filter(id => !oldSet.has(id));
+        for (let i = fresh.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = fresh[i]; fresh[i] = fresh[j]; fresh[j] = t; }
+        const repeats = pool.filter(id => oldSet.has(id));
+        for (let i = repeats.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = repeats[i]; repeats[i] = repeats[j]; repeats[j] = t; }
+        const next = fresh.concat(repeats).slice(0, count);
+        if (next.length && next.slice().sort().join('|') !== oldKey) return next;
+      } catch (_) {}
+      return old;
     }
     function rerollDraftForStars76() {
       try {
@@ -42929,7 +42948,7 @@ function drawHudBossMiniStats(p, layout) {
         const oldCards = Array.isArray(d.cards) ? d.cards.slice() : [];
         const count = Math.max(3, Math.min(4, oldCards.length || 3));
         const next = chooseNewDraftCards76(count, oldCards);
-        if (!next || !next.length) return false;
+        if (!next || !next.length || next.slice().sort().join('|') === oldCards.slice().sort().join('|')) return false;
         p.moonSplinters = stars76() - cost;
         d.cards = next;
         d._v76StarRerolls = Math.floor(N(d._v76StarRerolls)) + 1;
@@ -43011,7 +43030,8 @@ function drawHudBossMiniStats(p, layout) {
       };
       draftUI.addEventListener('pointerdown', function (e) {
         if (e.target && e.target.closest && e.target.closest('[data-v76-star-action="reroll"]')) {
-          e.preventDefault(); e.stopPropagation();
+          // v85: keep the old widget isolated but let click synthesis survive.
+          e.stopPropagation();
         }
       }, true);
       draftUI.addEventListener('click', handler, true);
@@ -43239,8 +43259,28 @@ function drawHudBossMiniStats(p, layout) {
         room._v77MajorBossDefeated = true;
         room._v77MajorBossId = bossId || room._v77MajorBossId || 'majorBoss';
         room._v77MajorBossSafeAt = N(state.time);
-        room.cleared = true;
-        if (state.level) state.level.cleared = true;
+
+        // v85: never mark a standard boss room cleared before the global
+        // setRoomCleared() cascade has a chance to run. That cascade opens
+        // the bellway, installs the Starless Warden side-door, grants active
+        // charges, and schedules boss-draft timing. Sun/Drowned Sky victory
+        // rooms use their own Return Sigil / Cold Lantern route objects, so
+        // leave those on their custom path and keep the normal bellway closed.
+        const customVictory77 = !!(bossId === 'sunCore' || room._v39SunDefeated || room._v77SunCrater || room._v77SunReturnSigil || room._v80DrownedSky || room._v79DrownedSky);
+        const useStandardClear77 = !!(!customVictory77 && !room.cleared && state.level && room.kind === 'exit' && room.exit);
+        if (useStandardClear77 && typeof setRoomCleared === 'function') {
+          try { setRoomCleared(state.level, room); }
+          catch (e) {
+            log77(e, 'boss setRoomCleared');
+            room.cleared = true;
+            if (state.level) state.level.cleared = true;
+            if (room.exit) room.exit.active = true;
+          }
+        } else {
+          room.cleared = true;
+          if (state.level) state.level.cleared = true;
+          if (!customVictory77 && room.kind === 'exit' && room.exit) room.exit.active = true;
+        }
 
         try { if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles(); } catch (e) { log77(e, 'clearHostileProjectiles'); }
 
@@ -43863,13 +43903,26 @@ function drawHudBossMiniStats(p, layout) {
       return p ? Math.max(0, Math.floor(N(p.moonSplinters))) : 0;
     }
     function v78ChooseDifferent(count, oldCards) {
-      const oldKey = (oldCards || []).slice().sort().join('|');
-      for (let i = 0; i < 8; i++) {
+      const old = Array.isArray(oldCards) ? oldCards.slice() : [];
+      const oldKey = old.slice().sort().join('|');
+      const oldSet = new Set(old);
+      for (let i = 0; i < 16; i++) {
         const candidate = typeof chooseRandomItems === 'function' ? chooseRandomItems(count) : [];
         if (!candidate || !candidate.length) continue;
         if (candidate.slice().sort().join('|') !== oldKey) return candidate;
       }
-      return typeof chooseRandomItems === 'function' ? chooseRandomItems(count) : oldCards;
+      try {
+        const pool = (typeof ITEM_POOL !== 'undefined' && Array.isArray(ITEM_POOL))
+          ? ITEM_POOL.filter(item => item && item.id && (typeof ITEM_BY_ID === 'undefined' || ITEM_BY_ID[item.id]) && (typeof itemAvailableForDraft !== 'function' || itemAvailableForDraft(item))).map(item => item.id)
+          : [];
+        const fresh = pool.filter(id => !oldSet.has(id));
+        for (let i = fresh.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = fresh[i]; fresh[i] = fresh[j]; fresh[j] = t; }
+        const repeats = pool.filter(id => oldSet.has(id));
+        for (let i = repeats.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = repeats[i]; repeats[i] = repeats[j]; repeats[j] = t; }
+        const next = fresh.concat(repeats).slice(0, count);
+        if (next.length && next.slice().sort().join('|') !== oldKey) return next;
+      } catch (_) {}
+      return old;
     }
     function v78Reroll() {
       try {
@@ -43889,8 +43942,9 @@ function drawHudBossMiniStats(p, layout) {
         const oldCards = Array.isArray(d.cards) ? d.cards.slice() : [];
         const count = Math.max(3, Math.min(4, oldCards.length || 3));
         const next = v78ChooseDifferent(count, oldCards);
-        if (!next || !next.length) {
+        if (!next || !next.length || next.slice().sort().join('|') === oldCards.slice().sort().join('|')) {
           sys.stats.rerollDenied += 1;
+          try { if (typeof pushMessage === 'function') pushMessage('The graft pool refused to change', '#dac7ff', 14, 1.0, 0.18); } catch (_) {}
           return false;
         }
         p.moonSplinters = stars - cost;
@@ -43955,7 +44009,10 @@ function drawHudBossMiniStats(p, layout) {
             v78Reroll();
           };
           btn.onpointerdown = function (e) {
-            try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+            // v85: pointerdown preventDefault on a <button> can suppress the
+            // synthetic click on iOS Safari/Chromium. Stop propagation only;
+            // the v84 capture rescue handles direct pointer rerolls.
+            try { e.stopPropagation(); } catch (_) {}
           };
         }
         sys.stats.rerollWidgetRedraws += 1;
@@ -44536,7 +44593,7 @@ function drawHudBossMiniStats(p, layout) {
               const a = ang + i * 0.07;
               const speed = 320;
               if (typeof state.bullets !== 'undefined' && Array.isArray(state.bullets)) {
-                state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.6, damage: 1, color: '#bde7ff' });
+                state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.6, r: 4.6, damage: 1, color: '#bde7ff', sourceEnemyType: e.typeId || e.behavior || 'v79DrownedSun', bossSource: true, sunRay: true, majorHazard: true });
               }
             }
             e._v79SweepCd = 4.5;
@@ -45757,7 +45814,7 @@ function drawHudBossMiniStats(p, layout) {
               const a = ang + i * 0.07;
               const speed = 320;
               if (Array.isArray(state.bullets)) {
-                state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.6, damage: 1, color: '#bde7ff' });
+                state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.6, r: 4.6, damage: 1, color: '#bde7ff', sourceEnemyType: e.typeId || e.behavior || 'v80DrownedSun', bossSource: true, sunRay: true, majorHazard: true });
               }
             }
             e._v80SweepCd = 4.5;
@@ -45794,7 +45851,7 @@ function drawHudBossMiniStats(p, layout) {
                 const a = ang + off + i * 0.09;
                 const speed = 340;
                 if (Array.isArray(state.bullets)) {
-                  state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.4, damage: 1, color: '#bde7ff' });
+                  state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.4, r: 4.4, damage: 1, color: '#bde7ff', sourceEnemyType: e.typeId || e.behavior || 'v80DrownedSun', bossSource: true, sunRay: true, majorHazard: true });
                 }
               }
             }
@@ -47326,17 +47383,31 @@ function drawHudBossMiniStats(p, layout) {
         const cx = (typeof playViewCenterX === 'function') ? playViewCenterX() : (typeof W !== 'undefined' ? W * 0.5 : 0);
         const cy = (typeof playViewCenterY === 'function') ? playViewCenterY() : (typeof H !== 'undefined' ? H * 0.5 : 0);
         let mx = p.x, my = p.y;
+        let useAimAngle = true;
         try {
           if (typeof input !== 'undefined' && input && input.mouse) {
-            mx = N(state.camera.x) - cx + N(input.mouse.x);
-            my = N(state.camera.y) - cy + N(input.mouse.y);
+            const touchActive = !!(input.aimTouch && input.aimTouch.id !== null);
+            useAimAngle = !input.mouse.seen || touchActive;
+            if (!useAimAngle) {
+              mx = N(state.camera.x) - cx + N(input.mouse.x);
+              my = N(state.camera.y) - cy + N(input.mouse.y);
+            }
           }
         } catch (_) {}
-        // Fallback to aim-angle if mouse coords look wrong
-        if (!Number.isFinite(mx) || !Number.isFinite(my) || (mx === 0 && my === 0)) {
-          const a = N(p.aimAngle);
-          mx = p.x + Math.cos(a) * 180;
-          my = p.y + Math.sin(a) * 180;
+        // Fallback to aim-angle when there is no real mouse target. On touch
+        // screens input.mouse remains at its W/2,H/2 default, so using it would
+        // place the anchor at screen center instead of where the player aims.
+        if (useAimAngle || !Number.isFinite(mx) || !Number.isFinite(my) || (mx === 0 && my === 0)) {
+          let ax = Math.cos(N(p.aimAngle));
+          let ay = Math.sin(N(p.aimAngle));
+          try {
+            if (typeof input !== 'undefined' && input && input.aimTouch && input.aimTouch.id !== null) {
+              const l = Math.hypot(N(input.aimTouch.dx), N(input.aimTouch.dy));
+              if (l > 0.18) { ax = N(input.aimTouch.dx) / l; ay = N(input.aimTouch.dy) / l; }
+            }
+          } catch (_) {}
+          mx = p.x + ax * 200;
+          my = p.y + ay * 200;
         }
         const dx = mx - p.x, dy = my - p.y, d = Math.hypot(dx, dy);
         const cap = N(sys.config.AIM_CAP_PX, 320);
@@ -47927,12 +47998,9 @@ function drawHudBossMiniStats(p, layout) {
           if (id === 'moots') continue;
           if (id === 'vesper') continue;
           if (id === NADIR83) continue;
-          // Unknown future passengers should never be granted just because they exist.
-          if (save.unlockedCharacters[id] === true) {
-            save.unlockedCharacters[id] = false;
-            changed = true;
-            sys.stats.defaultUnlockRepairs += 1;
-          }
+          // v85: do not hard-lock unknown future passengers. This guard exists
+          // only to enforce known strict unlocks; future ids should be governed
+          // by the build that introduces them, not by v83's historical allowlist.
         }
         return changed;
       } catch (e) { log83(e, 'normalizeDefaultUnlocks'); return false; }
@@ -48055,318 +48123,812 @@ function drawHudBossMiniStats(p, layout) {
     } catch (e) { log83(e, 'install'); }
   })();
 
-
   // ===================================================================
-  // === v84 — Claude bug-fix pass on top of Pro's v83 hardening =======
+  // === v84 — Star-reroll input rescue + Warden bellway restore ========
   // ===================================================================
-  // Addresses 6 bugs from /BUG_REPORT_FOR_PRO_v83.md:
-  //   1. Boss-death over-clear: v77 makeMajorBossRoomSafe77 sets
-  //      room.cleared = true directly, bypassing setRoomCleared. Result:
-  //      room.exit.active never set (softlock-risk), v71 starless-door
-  //      install wrap never fires (the Warden room's secret door + Ferry
-  //      teleporter never spawn), v68 Boon Moots gets no charge on boss
-  //      kills. We wrap killEnemy outermost; after a major boss dies,
-  //      if room.cleared is set but the cascade didn't fire, run it.
-  //   2. Reroll click never fires: v78 binds btn.onpointerdown {
-  //      preventDefault() } which cancels the synthetic click. We
-  //      clear the broken handler after every draft render.
-  //   3. Black Anchor trivializes boss bullets: v82 checks for flags
-  //      (bossBeam / sunRay / majorHazard) that nothing in the codebase
-  //      sets. While a major boss is alive, we tag fresh enemy bullets
-  //      with bossBeam so v82's anchor skips them.
-  //   4. Mobile anchor placement: v82 reads input.mouse which never
-  //      updates on touch (default stays at W/2, H/2). On mobile, the
-  //      anchor always lands at screen center. We rewrite input.mouse
-  //      to "200px ahead of player in aim direction" on any
-  //      touch-input session (input.mouse.seen === false) so v82's
-  //      aim derivation produces a sensible world point.
-  //   5. Codex boss-card count desync: v71 sometimes re-renders the
-  //      deck without going through the wrapped openCodex/renderCodexStats,
-  //      leaving the Drowned Sun card unappended and the count text
-  //      stuck at X/6. MutationObserver re-appends + re-writes the
-  //      count whenever the deck mutates.
-  //   6. Moots evidence cleanup: v75's evidence75 still treats
-  //      highestBiomeReached >= 10 as a Moots unlock signal. v78 scrubs
-  //      after but leaves a stale in-memory window. Per-frame backup
-  //      scrub here so the wrong value never persists past one frame.
-  // ===================================================================
-  (function installV84ClaudeFollowUp() {
-    const V84_VERSION = 'qual.claude-followup-bugfixes.2026-05-14.v84';
-    const CACHE84 = 'no-moon-claude-followup-bugfixes-v84';
+  (function installV84RerollAndBellwayRescue() {
+    const V84_VERSION = 'qual.reroll-bellway-rescue.2026-05-13.v84';
+    const CACHE84 = 'no-moon-reroll-bellway-rescue-v84';
     if (typeof state === 'undefined' || !state) return;
-    if (state.v84ClaudeFollowUp && state.v84ClaudeFollowUp.installed) return;
+    if (state.v84RerollBellwayRescue && state.v84RerollBellwayRescue.installed) return;
 
-    const sys = state.v84ClaudeFollowUp = {
+    const sys = state.v84RerollBellwayRescue = {
       installed: true,
       version: V84_VERSION,
       cacheExpected: CACHE84,
       stats: {
-        bossExitFixes: 0,
-        rerollPointerdownCleared: 0,
-        bossBulletsTagged: 0,
-        mobileAimRewrites: 0,
-        codexDrownedSunAppends: 0,
-        codexCountRewrites: 0,
-        mootsScrubs: 0,
+        cssInjected: 0,
+        widgetsDrawn: 0,
+        pointerRerolls: 0,
+        clickRerolls: 0,
+        rerollSuccesses: 0,
+        rerollDenied: 0,
+        bellwaysRestored: 0,
+        watchdogRestores: 0,
         lastError: null
       }
     };
 
-    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
-    const MAJOR_BOSS_TYPES = ['warden', 'archon', 'sunCore', 'v59NightFerry', 'v80DrownedSun', 'v79DrownedSun'];
+    const N84 = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    const NOW84 = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
     function log84(e, where) {
       const msg = (where || 'v84') + ': ' + (e && (e.message || String(e)) || 'unknown');
       sys.stats.lastError = msg;
       try { console.warn('[No Moon v84]', msg, e); } catch (_) {}
     }
-    function tag84() { try { state.buildTag = V84_VERSION; } catch (_) {} }
-    function isMajorBoss84(enemy) {
-      if (!enemy) return false;
-      const id = String(enemy.typeId || '');
-      return MAJOR_BOSS_TYPES.indexOf(id) !== -1;
+    function tag84() { try { state.buildTag = V84_VERSION; const tagEl = (typeof document !== 'undefined') && document.getElementById('buildTagDisplay'); if (tagEl) tagEl.textContent = 'build: ' + state.buildTag; } catch (_) {} }
+    function currentRoom84() { try { return typeof currentRoom === 'function' ? currentRoom() : (state.level && state.level.currentRoom) || null; } catch (_) { return null; } }
+
+    // -----------------------------------------------------------------
+    // 1. Star reroll: make the button fire on pointerdown AND click.
+    //    The prior button relied on synthetic click after a prevented
+    //    pointerdown, which could be swallowed on some browsers/devices.
+    // -----------------------------------------------------------------
+    function activeDraft84() {
+      return !!(state.mode === 'play' && state.draft && state.draft.active && !state.draft.resolved && Array.isArray(state.draft.cards) && state.draft.cards.length);
+    }
+    function stars84() {
+      const p = state.player;
+      return p ? Math.max(0, Math.floor(N84(p.moonSplinters))) : 0;
+    }
+    function rerollCost84() {
+      const d = state.draft;
+      const used = d ? Math.floor(N84(d._v76StarRerolls)) : 0;
+      return Math.max(3, 5 + used * 3);
+    }
+    function key84(cards) {
+      return (cards || []).slice().sort().join('|');
+    }
+    function shuffle84(list) {
+      const out = (list || []).slice();
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = out[i]; out[i] = out[j]; out[j] = t;
+      }
+      return out;
+    }
+    function chooseDifferentCards84(count, oldCards) {
+      const old = Array.isArray(oldCards) ? oldCards.slice() : [];
+      const oldKey = key84(old);
+      const oldSet = new Set(old);
+      for (let i = 0; i < 24; i++) {
+        const next = (typeof chooseRandomItems === 'function') ? chooseRandomItems(count) : [];
+        if (Array.isArray(next) && next.length && key84(next) !== oldKey) return next;
+      }
+      try {
+        const pool = (typeof ITEM_POOL !== 'undefined' && Array.isArray(ITEM_POOL))
+          ? ITEM_POOL.filter((item) => item && item.id && (typeof ITEM_BY_ID === 'undefined' || ITEM_BY_ID[item.id]) && (typeof itemAvailableForDraft !== 'function' || itemAvailableForDraft(item))).map((item) => item.id)
+          : [];
+        const fresh = shuffle84(pool.filter((id) => !oldSet.has(id)));
+        const repeats = shuffle84(pool.filter((id) => oldSet.has(id)));
+        const next = fresh.concat(repeats).slice(0, count);
+        return next.length ? next : old;
+      } catch (_) {
+        return old;
+      }
+    }
+    function redrawRerollWidget84() {
+      try {
+        const active = activeDraft84();
+        const old = document.getElementById('v76StarTrade');
+        if (!active) { if (old) old.remove(); return; }
+        if (typeof draftCards === 'undefined' || !draftCards) return;
+        injectRerollCss84();
+        let el = old;
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'v76StarTrade';
+          draftCards.insertAdjacentElement('afterend', el);
+        }
+        el.classList.add('v84StarTrade');
+        const stars = stars84();
+        const cost = rerollCost84();
+        const enough = stars >= cost;
+        const label = enough ? ('Reroll grafts — ' + cost + '★') : ('Need ' + (cost - stars) + '★ more');
+        el.innerHTML = ''
+          + '<div class="v84Stars">★ ' + stars + '</div>'
+          + '<button type="button" id="v84RerollBtn" data-v84-star-action="reroll" aria-disabled="' + (enough ? 'false' : 'true') + '">' + label + '</button>';
+        const btn = el.querySelector('#v84RerollBtn');
+        if (btn) {
+          btn.onpointerdown = handleRerollInput84;
+          btn.onclick = handleRerollInput84;
+        }
+        sys.stats.widgetsDrawn += 1;
+      } catch (e) { log84(e, 'redrawRerollWidget'); }
+    }
+    function injectRerollCss84() {
+      try {
+        if (document.getElementById('v84-reroll-rescue-css')) return;
+        const st = document.createElement('style');
+        st.id = 'v84-reroll-rescue-css';
+        st.textContent = ''
+          + 'body #v76StarTrade.v84StarTrade{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;max-width:390px!important;margin:14px auto 2px!important;padding:8px 14px!important;border-radius:999px!important;border:1px solid rgba(217,212,255,.30)!important;background:linear-gradient(180deg,rgba(20,20,36,.90),rgba(8,9,16,.96))!important;box-shadow:0 6px 20px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06)!important;color:rgba(241,239,255,.90)!important;font:900 12px Inter,system-ui,sans-serif!important;pointer-events:auto!important;}'
+          + 'body #v76StarTrade.v84StarTrade .v84Stars{letter-spacing:.05em;text-transform:uppercase;color:rgba(230,236,255,.88);white-space:nowrap;font-size:13px;}'
+          + 'body #v84RerollBtn{border:1px solid rgba(217,212,255,.34);border-radius:999px;padding:8px 16px;color:#f7f3ff;background:linear-gradient(180deg,rgba(64,52,98,.96),rgba(22,23,40,.98));font:900 12px Inter,system-ui,sans-serif;cursor:pointer;letter-spacing:.04em;transition:transform 90ms ease,box-shadow 140ms ease,filter 120ms ease;pointer-events:auto;}'
+          + 'body #v84RerollBtn:hover[aria-disabled="false"]{transform:translateY(-1px);box-shadow:0 8px 18px rgba(155,140,220,.28);filter:brightness(1.05);}'
+          + 'body #v84RerollBtn:active[aria-disabled="false"]{transform:translateY(0);filter:brightness(.95);}'
+          + 'body #v84RerollBtn[aria-disabled="true"]{opacity:.55;cursor:not-allowed;filter:saturate(.55);}'
+          + 'body #v76StarTrade.v84Spent{animation:v84StarPulse 420ms ease-out 1;}'
+          + '@keyframes v84StarPulse{0%{box-shadow:0 0 0 rgba(217,212,255,0),inset 0 1px 0 rgba(255,255,255,.06);}45%{box-shadow:0 0 26px rgba(217,212,255,.42),inset 0 1px 0 rgba(255,255,255,.13);}100%{box-shadow:0 6px 20px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.06);}}'
+          + '@media(max-width:720px){body #v76StarTrade.v84StarTrade{max-width:calc(100% - 20px)!important;padding:8px 12px!important;}body #v84RerollBtn{padding:7px 12px;font-size:11.5px;}}';
+        document.head.appendChild(st);
+        sys.stats.cssInjected += 1;
+      } catch (e) { log84(e, 'injectRerollCss'); }
+    }
+    function rerollDraft84(source) {
+      try {
+        const d = state.draft;
+        const p = state.player;
+        if (!p || !activeDraft84()) {
+          sys.stats.rerollDenied += 1;
+          return false;
+        }
+        const cost = rerollCost84();
+        const stars = stars84();
+        if (stars < cost) {
+          sys.stats.rerollDenied += 1;
+          try { if (typeof pushMessage === 'function') pushMessage('Need ' + (cost - stars) + ' more ★ to reroll', '#dac7ff', 14, 1.0, 0.18); } catch (_) {}
+          redrawRerollWidget84();
+          return false;
+        }
+        const oldCards = Array.isArray(d.cards) ? d.cards.slice() : [];
+        const count = Math.max(3, Math.min(4, oldCards.length || 3));
+        const next = chooseDifferentCards84(count, oldCards);
+        if (!Array.isArray(next) || !next.length || key84(next) === key84(oldCards)) {
+          sys.stats.rerollDenied += 1;
+          try { if (typeof pushMessage === 'function') pushMessage('The graft pool refused to change', '#dac7ff', 14, 1.0, 0.18); } catch (_) {}
+          redrawRerollWidget84();
+          return false;
+        }
+        p.moonSplinters = Math.max(0, stars - cost);
+        d.cards = next;
+        d._v76StarRerolls = Math.floor(N84(d._v76StarRerolls)) + 1;
+        d.renderKey = '';
+        d.hover = -1;
+        sys.stats.rerollSuccesses += 1;
+        if (source === 'pointerdown') sys.stats.pointerRerolls += 1;
+        if (source === 'click') sys.stats.clickRerolls += 1;
+        try {
+          if (typeof spawnRing === 'function' && p.x != null) spawnRing(p.x, p.y, '#d9d4ff', 64);
+          if (typeof spawnSpark === 'function' && p.x != null) spawnSpark(p.x, p.y, '#f3dcff', 12, 145);
+          if (typeof playToneBurst === 'function') playToneBurst({ type: 'sine', startFreq: 520, endFreq: 760, duration: 0.22, gain: 0.05, filterFreq: 2200 });
+          if (typeof pushMessage === 'function') pushMessage('The graft cards turn over', '#d9d4ff', 16, 1.05, 0.14);
+        } catch (_) {}
+        try { renderDraftUI(true); } catch (_) { redrawRerollWidget84(); }
+        try {
+          const el = document.getElementById('v76StarTrade');
+          if (el) { el.classList.remove('v84Spent'); void el.offsetWidth; el.classList.add('v84Spent'); }
+        } catch (_) {}
+        return true;
+      } catch (e) { log84(e, 'rerollDraft'); return false; }
+    }
+    state.v84Reroll = rerollDraft84;
+
+    function rerollButtonFromEvent84(ev) {
+      try {
+        const target = ev && ev.target;
+        const btn = target && target.closest && target.closest('#v84RerollBtn,#v78RerollBtn,[data-v84-star-action="reroll"],[data-v76-star-action="reroll"],[data-v57-action="reroll"]');
+        if (!btn) return null;
+        if (btn.dataset && btn.dataset.v57Action && btn.dataset.v57Action !== 'reroll') return null;
+        return btn;
+      } catch (_) { return null; }
+    }
+    function handleRerollInput84(ev) {
+      const btn = rerollButtonFromEvent84(ev);
+      if (!btn) return;
+      try { ev.preventDefault(); ev.stopPropagation(); if (ev.stopImmediatePropagation) ev.stopImmediatePropagation(); } catch (_) {}
+      const now = NOW84();
+      if (ev.type === 'click' && state._v84LastRerollInputAt && now - state._v84LastRerollInputAt < 360) return false;
+      state._v84LastRerollInputAt = now;
+      rerollDraft84(ev.type || 'input');
+      return false;
+    }
+
+    if (typeof document !== 'undefined' && !document.__v84StarRerollRescue) {
+      document.addEventListener('pointerdown', handleRerollInput84, { capture: true, passive: false });
+      document.addEventListener('click', handleRerollInput84, { capture: true, passive: false });
+      document.__v84StarRerollRescue = true;
+    }
+    if (typeof renderDraftUI === 'function' && !renderDraftUI.__v84StarRerollRescue) {
+      const baseRenderDraft84 = renderDraftUI;
+      renderDraftUI = function renderDraftUIV84() {
+        const out = baseRenderDraft84.apply(this, arguments);
+        try { redrawRerollWidget84(); } catch (e) { log84(e, 'renderDraft'); }
+        return out;
+      };
+      renderDraftUI.__v84StarRerollRescue = true;
     }
 
     // -----------------------------------------------------------------
-    // FIX 1: Boss-death over-clear — run setRoomCleared cascade
-    //        after v77 has flagged the room safe.
+    // 2. Boss safety fix: v77 correctly removed post-boss damage, but it
+    //    also marked the boss room cleared before the normal bellway path
+    //    could activate. Restore the normal Warden/Archon clear pipeline.
     // -----------------------------------------------------------------
-    if (typeof killEnemy === 'function' && !killEnemy.__v84BossExitFix) {
+    function restorableBossId84(id) {
+      id = String(id || '');
+      return id === 'warden' || id === 'archon';
+    }
+    function restoreBossBellway84(room, bossId, source) {
+      try {
+        room = room || currentRoom84();
+        const level = state.level;
+        const id = bossId || (room && room._v77MajorBossId) || '';
+        if (!level || !room || !restorableBossId84(id)) return false;
+        if (room._v84BossBellwayRestored && room.exit && room.exit.active) return false;
+        if (room.kind !== 'exit' || !room.hasBoss || !room.exit) return false;
+
+        // Re-run the real setRoomCleared wrapper chain once. Temporarily
+        // undo v77's early cleared flag so v71/v82/boss wrappers can do their
+        // normal work: bellway activation, boss draft, side-door install,
+        // active-charge credit, lock timers, and messaging.
+        const prevCleared = !!room.cleared;
+        const prevLevelCleared = !!level.cleared;
+        room.cleared = false;
+        level.cleared = false;
+        if (typeof setRoomCleared === 'function') {
+          setRoomCleared(level, room);
+        } else {
+          room.cleared = true;
+          level.cleared = true;
+          room.exit.active = true;
+          room.pendingBossDraft = id !== 'archon';
+        }
+        room._v84BossBellwayRestored = true;
+        room._v84BossBellwayRestoredFrom = source || 'unknown';
+        if (level.currentRoom === room) {
+          level.exit = room.exit;
+          level.hazards = room.hazards || [];
+          level.traps = room.traps || [];
+          level.enemies = room.enemies || [];
+        }
+        if (!room.exit.active) room.exit.active = true;
+        sys.stats.bellwaysRestored += 1;
+        return true;
+      } catch (e) {
+        try {
+          if (room) room.cleared = true;
+          if (state.level) state.level.cleared = true;
+        } catch (_) {}
+        log84(e, 'restoreBossBellway');
+        return false;
+      }
+    }
+    state.v84RestoreBossBellway = restoreBossBellway84;
+
+    if (typeof killEnemy === 'function' && !killEnemy.__v84BossBellwayRescue) {
       const baseKill84 = killEnemy;
       killEnemy = function killEnemyV84(enemy, bullet) {
-        const isMajor = isMajorBoss84(enemy) && !enemy.remove;
+        const roomBefore = currentRoom84();
+        const bossId = enemy && !enemy.remove && (enemy.typeId || enemy.behavior || '');
+        const shouldRestore = !!(enemy && enemy.boss && restorableBossId84(bossId));
         const out = baseKill84.apply(this, arguments);
-        if (isMajor) {
-          try {
-            const room = (typeof currentRoom === 'function') ? currentRoom() : null;
-            const level = state.level;
-            // If v77's over-clear ran (room.cleared = true) but the cascade
-            // never fired (exit.active is still false), run it now.
-            if (
-              room && level &&
-              room.cleared &&
-              room.exit &&
-              room.exit.active === false &&
-              typeof setRoomCleared === 'function'
-            ) {
-              // setRoomCleared internally re-sets room.cleared / level.cleared
-              // (no-op), then runs the exit.active = true, plays the bellway
-              // sound, pushes the BELLWAY CLEAR / THRONE SHATTERED message,
-              // triggers v71's wrap (starless doors install on Warden room),
-              // and triggers v68's wrap (Boon Moots charge).
-              setRoomCleared(level, room);
-              sys.stats.bossExitFixes += 1;
-            }
-          } catch (e) { log84(e, 'killEnemy bossExitFix'); }
+        if (shouldRestore) {
+          try { restoreBossBellway84(roomBefore, bossId, 'kill'); } catch (e) { log84(e, 'killRestore'); }
+          try { setTimeout(function () { restoreBossBellway84(roomBefore, bossId, 'kill-timeout'); }, 0); } catch (_) {}
         }
         return out;
       };
-      killEnemy.__v84BossExitFix = true;
+      killEnemy.__v84BossBellwayRescue = true;
     }
-
-    // -----------------------------------------------------------------
-    // FIX 2: Reroll button — clear v78's broken onpointerdown handler
-    //        after every draft re-render.
-    // -----------------------------------------------------------------
-    if (typeof renderDraftUI === 'function' && !renderDraftUI.__v84RerollFix) {
-      const baseDraft84 = renderDraftUI;
-      renderDraftUI = function renderDraftUIV84() {
-        const out = baseDraft84.apply(this, arguments);
-        try {
-          const btn = document.getElementById('v78RerollBtn');
-          if (btn && btn.onpointerdown) {
-            btn.onpointerdown = null;
-            sys.stats.rerollPointerdownCleared += 1;
-          }
-        } catch (e) { log84(e, 'rerollFix'); }
-        return out;
-      };
-      renderDraftUI.__v84RerollFix = true;
-    }
-
-    // -----------------------------------------------------------------
-    // FIX 3: Tag enemy bullets with bossBeam while a major boss is alive,
-    //        so v82's Black Anchor skips them.
-    // -----------------------------------------------------------------
-    if (typeof updateGame === 'function' && !updateGame.__v84BossBulletTag) {
+    if (typeof updateGame === 'function' && !updateGame.__v84BossBellwayWatchdog) {
       const baseUpdate84 = updateGame;
       updateGame = function updateGameV84(dt) {
         const out = baseUpdate84.apply(this, arguments);
         try {
-          if (state.mode === 'play' && Array.isArray(state.bullets) && Array.isArray(state.enemies)) {
-            const room = (typeof currentRoom === 'function') ? currentRoom() : null;
-            const bossAlive = state.enemies.some(function (e) { return e && e.boss && !e.remove; });
-            if (bossAlive) {
-              for (const b of state.bullets) {
-                if (!b || b.owner !== 'enemy' || b._v84Tagged) continue;
-                b._v84Tagged = true;
-                b.bossBeam = true;
-                sys.stats.bossBulletsTagged += 1;
-              }
-            }
+          const room = currentRoom84();
+          if (room && room._v77MajorBossDefeated && restorableBossId84(room._v77MajorBossId) && room.exit && !room.exit.active) {
+            if (restoreBossBellway84(room, room._v77MajorBossId, 'watchdog')) sys.stats.watchdogRestores += 1;
           }
-        } catch (e) { log84(e, 'bulletTag'); }
+        } catch (e) { log84(e, 'updateWatchdog'); }
         return out;
       };
-      updateGame.__v84BossBulletTag = true;
+      updateGame.__v84BossBellwayWatchdog = true;
     }
 
-    // -----------------------------------------------------------------
-    // FIX 4: Mobile Black Anchor aim — rewrite input.mouse to a
-    //        sensible "aim-ahead" world point on touch sessions.
-    // -----------------------------------------------------------------
-    function rewriteMouseToAim84(ev) {
-      try {
-        if (!state.player || !state.player.template || state.player.template.id !== 'nadir') return;
-        if (state.mode !== 'play') return;
-        if (typeof input === 'undefined' || !input || !input.mouse) return;
-        // Desktop mouse already tracked correctly.
-        if (input.mouse.seen) return;
-        // Touch session — replace input.mouse with screen-space position
-        // 200 px ahead of the player in their current aim direction.
-        const p = state.player;
-        const a = N(p.aimAngle);
-        const cx = (typeof playViewCenterX === 'function') ? playViewCenterX() : (typeof W !== 'undefined' ? W * 0.5 : 0);
-        const cy = (typeof playViewCenterY === 'function') ? playViewCenterY() : (typeof H !== 'undefined' ? H * 0.5 : 0);
-        const worldX = p.x + Math.cos(a) * 200;
-        const worldY = p.y + Math.sin(a) * 200;
-        input.mouse.x = worldX - state.camera.x + cx;
-        input.mouse.y = worldY - state.camera.y + cy;
-        sys.stats.mobileAimRewrites += 1;
-      } catch (e) { log84(e, 'mobileAim'); }
-    }
-    try {
-      // document-capture so we fire BEFORE v82's canvas capture handler.
-      document.addEventListener('pointerdown', rewriteMouseToAim84, { capture: true, passive: true });
-      document.addEventListener('touchstart', rewriteMouseToAim84, { capture: true, passive: true });
-    } catch (e) { log84(e, 'bindMobileAim'); }
-
-    // -----------------------------------------------------------------
-    // FIX 5: Codex boss-card count desync — MutationObserver on the
-    //        codex overlay re-appends the Drowned Sun card + rewrites
-    //        the count text whenever the deck mutates without v81 hitting it.
-    // -----------------------------------------------------------------
-    function appendDrownedSunCard84(grid) {
-      try {
-        if (!grid || grid.querySelector('[data-v81-boss="drownedSun"]')) return false;
-        const save = state.save || {};
-        const db = save.defeatedBosses || {};
-        let mirror = {};
-        try { mirror = JSON.parse(localStorage.getItem('noMoonProgress_v68') || '{}') || {}; } catch (_) {}
-        const mdb = mirror.defeatedBosses || {};
-        const defeated = !!db.drownedSun || !!mdb.drownedSun;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.dataset.v81Boss = 'drownedSun';
-        btn.className = defeated ? 'v71BossCard revealed' : 'v71BossCard locked';
-        btn.setAttribute('aria-label', defeated ? 'Drowned Sun defeated' : 'Sealed defeated-boss card');
-        btn.innerHTML = defeated
-          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
-          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
-        grid.appendChild(btn);
-        sys.stats.codexDrownedSunAppends += 1;
-        // Rewrite the count text on the parent .v71BossDeck.
-        const deck = grid.closest ? grid.closest('.v71BossDeck') : null;
-        const countEl = deck && deck.querySelector ? deck.querySelector('.v71BossDeckCount') : null;
-        if (countEl) {
-          const m = String(countEl.textContent || '').match(/(\d+)\s*\/\s*(\d+)\s+revealed/i);
-          if (m) {
-            let num = N(m[1]);
-            const den = N(m[2]) + 1;
-            if (defeated) num += 1;
-            countEl.textContent = num + '/' + den + ' revealed';
-            sys.stats.codexCountRewrites += 1;
-          }
-        }
-        return true;
-      } catch (e) { log84(e, 'appendDrownedSun'); return false; }
-    }
-    try {
-      const codexEl = (typeof codexOverlay !== 'undefined') ? codexOverlay : null;
-      if (codexEl && typeof MutationObserver !== 'undefined' && !codexEl.__v84CodexObserver) {
-        const mo = new MutationObserver(function (records) {
-          try {
-            for (const r of records) {
-              if (!r || !r.target) continue;
-              const grid = r.target.classList && r.target.classList.contains('v71BossGrid')
-                ? r.target
-                : (typeof r.target.querySelector === 'function' ? r.target.querySelector('.v71BossGrid') : null);
-              if (grid) appendDrownedSunCard84(grid);
-            }
-            // Also check the whole overlay once per batch — covers cases
-            // where the mutation target is the panel, not the grid.
-            const liveGrid = codexEl.querySelector ? codexEl.querySelector('.v71BossGrid') : null;
-            if (liveGrid) appendDrownedSunCard84(liveGrid);
-          } catch (e) { log84(e, 'mutationCallback'); }
-        });
-        mo.observe(codexEl, { childList: true, subtree: true });
-        codexEl.__v84CodexObserver = mo;
-      }
-    } catch (e) { log84(e, 'codexObserverInstall'); }
-
-    // -----------------------------------------------------------------
-    // FIX 6: Moots evidence cleanup — scrub the false unlock that v75's
-    //        evidence75 still produces from highestBiomeReached.
-    // -----------------------------------------------------------------
-    function scrubMoots84() {
-      try {
-        if (!state.save || !state.save.unlockedCharacters) return false;
-        if (state.save.unlockedCharacters.moots !== true) return false;
-        const lt = state.save.lifetime || {};
-        const v = state.save.victories || {};
-        const ach = state.save.achievements || {};
-        const strict = N(lt.wins) > 0 || N(v.routeClears) > 0 || !!(ach.wins_1 && ach.wins_1.unlocked);
-        if (!strict) {
-          state.save.unlockedCharacters.moots = false;
-          sys.stats.mootsScrubs += 1;
-          return true;
-        }
-        return false;
-      } catch (e) { log84(e, 'scrubMoots'); return false; }
-    }
-    // Run on safeWriteSave PRE so the persisted save never holds a false unlock.
-    if (typeof safeWriteSave === 'function' && !safeWriteSave.__v84MootsScrub) {
-      const baseSafeWrite84 = safeWriteSave;
-      safeWriteSave = function safeWriteSaveV84() {
-        try { scrubMoots84(); } catch (e) { log84(e, 'preSafeWrite'); }
-        return baseSafeWrite84.apply(this, arguments);
-      };
-      safeWriteSave.__v84MootsScrub = true;
-    }
-    // Also run on renderCharacterCards so the card UI never reflects a false unlock.
-    if (typeof renderCharacterCards === 'function' && !renderCharacterCards.__v84MootsScrub) {
-      const baseCards84 = renderCharacterCards;
-      renderCharacterCards = function renderCharacterCardsV84() {
-        try { scrubMoots84(); } catch (_) {}
-        return baseCards84.apply(this, arguments);
-      };
-      renderCharacterCards.__v84MootsScrub = true;
-    }
-
-    // -----------------------------------------------------------------
-    // Debug
-    // -----------------------------------------------------------------
     state.v84Debug = function v84Debug() {
+      try { tag84(); } catch (_) {}
+      const room = currentRoom84();
+      let v83 = null;
+      try { v83 = typeof state.v83Debug === 'function' ? state.v83Debug() : null; } catch (_) { v83 = null; }
+      try { tag84(); } catch (_) {}
       return {
         version: V84_VERSION,
         buildTag: state.buildTag,
         cacheExpected: CACHE84,
+        draft: state.draft && {
+          active: !!state.draft.active,
+          resolved: !!state.draft.resolved,
+          cards: Array.isArray(state.draft.cards) ? state.draft.cards.slice() : [],
+          cost: rerollCost84(),
+          stars: stars84(),
+          rerollsThisDraft: Math.floor(N84(state.draft._v76StarRerolls))
+        },
+        room: room && {
+          id: room.id,
+          kind: room.kind,
+          hasBoss: !!room.hasBoss,
+          cleared: !!room.cleared,
+          exitActive: !!(room.exit && room.exit.active),
+          v77BossId: room._v77MajorBossId || null,
+          v84Restored: !!room._v84BossBellwayRestored,
+          starlessDoors: Array.isArray(room._v71StarlessDoors) ? room._v71StarlessDoors.length : 0
+        },
         stats: Object.assign({}, sys.stats),
-        v83: typeof state.v83Debug === 'function' ? state.v83Debug() : null
+        v83: v83
       };
     };
 
     try {
+      injectRerollCss84();
+      redrawRerollWidget84();
       tag84();
-      setTimeout(tag84, 0);
-      setTimeout(tag84, 350);
-      setTimeout(tag84, 1400);
+      setTimeout(function () { try { redrawRerollWidget84(); tag84(); } catch (_) {} }, 0);
+      setTimeout(function () { try { redrawRerollWidget84(); tag84(); } catch (_) {} }, 350);
+      setTimeout(function () { try { redrawRerollWidget84(); tag84(); } catch (_) {} }, 1400);
+      setTimeout(function () { try { redrawRerollWidget84(); tag84(); } catch (_) {} }, 3000);
+      setTimeout(function () { try { redrawRerollWidget84(); tag84(); } catch (_) {} }, 6000);
       if (typeof window !== 'undefined') {
-        window.__NO_MOON_V84_CLAUDE_FOLLOWUP__ = sys;
+        window.__NO_MOON_V84_REROLL_BELLWAY_RESCUE__ = sys;
         window.noMoonV84Debug = function () { return state.v84Debug(); };
+        window.noMoonV84Reroll = function () { return rerollDraft84('console'); };
+        window.noMoonV84RestoreBossBellway = function () { return restoreBossBellway84(currentRoom84(), currentRoom84() && currentRoom84()._v77MajorBossId, 'console'); };
       }
     } catch (e) { log84(e, 'install'); }
     state.buildTag = V84_VERSION;
+  })();
+
+
+
+  // ===================================================================
+  // === v85 — Deep bugfix pass: boss clear, anchor, codex, draft ========
+  // ===================================================================
+  (function installV85DeepBugfixPass() {
+    const V85_VERSION = 'qual.deep-bugfix-boss-anchor-codex.2026-05-13.v85';
+    const CACHE85 = 'no-moon-deep-bugfix-boss-anchor-codex-v85';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v85DeepBugfixPass && state.v85DeepBugfixPass.installed) return;
+
+    const sys = state.v85DeepBugfixPass = {
+      installed: true,
+      version: V85_VERSION,
+      cacheExpected: CACHE85,
+      stats: {
+        bossClearRepairs: 0,
+        customRoomClearsCharged: 0,
+        bossBulletsTagged: 0,
+        codexRepairs: 0,
+        codexObserverEvents: 0,
+        futurePassengerPasses: 0,
+        lastError: null
+      }
+    };
+
+    const N85 = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    function log85(e, where) {
+      const msg = (where || 'v85') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v85]', msg, e); } catch (_) {}
+    }
+    function tag85() { try { state.buildTag = V85_VERSION; const tag = (typeof document !== 'undefined') && document.getElementById('buildTagDisplay'); if (tag) tag.textContent = 'build: ' + state.buildTag; } catch (_) {} }
+    function currentRoom85() { try { return typeof currentRoom === 'function' ? currentRoom() : (state.level && state.level.currentRoom) || null; } catch (_) { return null; } }
+
+    // Repair any already-bad live state from v77/v84 where a standard boss room
+    // was flagged cleared but its bellway/side-route cascade never ran.
+    const STANDARD_BOSS_IDS85 = { warden: true, archon: true, v59NightFerry: true };
+    function repairStandardBossRoom85(room, source) {
+      try {
+        const level = state.level;
+        room = room || currentRoom85();
+        if (!level || !room || !room.exit || room.kind !== 'exit' || room._v39SunDefeated || room._v77SunCrater || room._v77SunReturnSigil || room._v80DrownedSky || room._v79DrownedSky) return false;
+        const id = String(room._v77MajorBossId || room._v84BossBellwayRestoredFrom || '');
+        const looksLikeBossClear = !!(room._v77MajorBossDefeated || room.hasBoss || STANDARD_BOSS_IDS85[id]);
+        if (!looksLikeBossClear) return false;
+        if (room.exit.active && !(level.index === 4 && !state._v59SkyBranchChosen && !Array.isArray(room._v71StarlessDoors))) return false;
+        const prevCleared = !!room.cleared;
+        const prevLevelCleared = !!level.cleared;
+        room.cleared = false;
+        level.cleared = false;
+        if (typeof setRoomCleared === 'function') setRoomCleared(level, room);
+        else { room.cleared = true; level.cleared = true; room.exit.active = true; }
+        room._v85BossClearRepaired = true;
+        room._v85BossClearRepairedFrom = source || 'unknown';
+        if (!room.exit.active) room.exit.active = true;
+        if (level.currentRoom === room) level.exit = room.exit;
+        sys.stats.bossClearRepairs += 1;
+        return prevCleared || prevLevelCleared || true;
+      } catch (e) { log85(e, 'repairStandardBossRoom'); return false; }
+    }
+
+    // Drowned Sky custom rooms set room.cleared directly, so v68/v82 active
+    // relics never see setRoomCleared(). Charge those actives once per custom
+    // room without altering v80's custom door semantics.
+    function chargeCustomDrownedRoom85(room) {
+      try {
+        if (!room || !room._v80DrownedSky || !room.cleared || room._v85CustomClearCharged) return false;
+        room._v85CustomClearCharged = true;
+        const amount = room.hasBoss || room._v80RoomKind === 'boss' ? 3 : 1;
+        const p = state.player;
+        if (p && p.template && p.template.id === 'nadir' && state.v82BlackAnchor && state.v82BlackAnchor.anchor) {
+          const a = state.v82BlackAnchor.anchor;
+          if (a.charges < a.maxCharges) {
+            a.roomProgress += amount;
+            if (a.roomProgress >= (state.v82BlackAnchor.config && state.v82BlackAnchor.config.ROOM_NEED || 3)) {
+              a.roomProgress = 0;
+              a.charges = a.maxCharges || 1;
+              try { if (typeof pushMessage === 'function') pushMessage('Black Anchor relaced', '#8fdcff', 16, 1.1, 0.16); } catch (_) {}
+            }
+          }
+        }
+        if (p && p.template && p.template.id === 'moots' && state.v68BoonMootsCareerAudio && state.v68BoonMootsCareerAudio.boon) {
+          const b = state.v68BoonMootsCareerAudio.boon;
+          if (b.charges < (b.maxCharges || 1)) {
+            b.roomProgress += amount;
+            if (b.roomProgress >= (b.roomNeed || 3)) {
+              b.roomProgress = 0;
+              b.charges = b.maxCharges || 1;
+              try { if (typeof pushMessage === 'function') pushMessage('Boon Moots relaced', '#f3dcff', 16, 1.1, 0.16); } catch (_) {}
+            }
+          }
+        }
+        sys.stats.customRoomClearsCharged += 1;
+        return true;
+      } catch (e) { log85(e, 'chargeCustomDrownedRoom'); return false; }
+    }
+
+    // Late bullet tagger catches any direct-pushed boss rays added by historical
+    // code or future wrappers before Black Anchor ticks next frame.
+    function tagBossBullets85() {
+      try {
+        const bossActive = (state.enemies || []).some(e => e && !e.remove && (e.boss || e.typeId === 'v80DrownedSun' || e.typeId === 'v79DrownedSun'));
+        if (!bossActive || !Array.isArray(state.bullets)) return;
+        for (const b of state.bullets) {
+          if (!b || b.owner !== 'enemy' || b._v85BossTagChecked) continue;
+          b._v85BossTagChecked = true;
+          const src = String(b.sourceEnemyType || b.enemyType || '');
+          const waterySunRay = !src && (b.color === '#bde7ff' || b.color === '#a89bff') && N85(b.life) >= 2.6 && N85(b.damage) >= 1;
+          if (/^(warden|archon|sunCore|v59NightFerry|falseMoon|v79DrownedSun|v80DrownedSun)$/.test(src) || waterySunRay) {
+            b.bossSource = true;
+            b.majorHazard = true;
+            if (/DrownedSun/.test(src) || waterySunRay) b.sunRay = true;
+            sys.stats.bossBulletsTagged += 1;
+          }
+        }
+      } catch (e) { log85(e, 'tagBossBullets'); }
+    }
+
+    // Codex Drowned Sun card: v71 rebuilds the boss deck from a closure-local
+    // six-card array. Keep the seventh card/count repaired after any mutation,
+    // not only after openCodex/renderCodexStats wrappers happen to run.
+    function readJson85(key) { try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) || {}) : {}; } catch (_) { return {}; } }
+    function drownedSunRevealed85() {
+      try {
+        const s = state.save || {};
+        const m = readJson85('noMoonProgress_v68');
+        const sd = s.defeatedBosses || {}, sv = s.victories || {};
+        const md = m.defeatedBosses || {}, mv = m.victories || {};
+        return !!(sd.drownedSun || md.drownedSun || N85(sv.drownedSkyClears) > 0 || N85(mv.drownedSkyClears) > 0 || N85(sv.drownedSunClears) > 0 || N85(mv.drownedSunClears) > 0);
+      } catch (_) { return false; }
+    }
+    function repairDrownedSunCodexCard85() {
+      if (state._v85RepairingCodex) return false;
+      state._v85RepairingCodex = true;
+      try {
+        if (typeof codexOverlay === 'undefined' || !codexOverlay) { state._v85RepairingCodex = false; return false; }
+        const deck = codexOverlay.querySelector && codexOverlay.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector('.v71BossGrid');
+        if (!deck || !grid) { state._v85RepairingCodex = false; return false; }
+        const countEl = deck.querySelector('.v71BossDeckCount');
+        const revealed = drownedSunRevealed85();
+        const stale = grid.querySelectorAll('[data-v81-boss="drownedSun"], [data-v85-boss="drownedSun"]');
+        for (const el of stale) el.remove();
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.v81Boss = 'drownedSun';
+        btn.dataset.v85Boss = 'drownedSun';
+        btn.className = revealed ? 'v71BossCard revealed' : 'v71BossCard locked';
+        btn.setAttribute('aria-label', revealed ? 'Drowned Sun defeated' : 'Sealed defeated-boss card');
+        btn.innerHTML = revealed
+          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
+          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
+        grid.appendChild(btn);
+        if (countEl) {
+          const baseCards = Array.from(grid.querySelectorAll('.v71BossCard')).filter(el => !(el.dataset && (el.dataset.v81Boss === 'drownedSun' || el.dataset.v85Boss === 'drownedSun')));
+          const baseRevealed = baseCards.filter(el => el.classList.contains('revealed')).length;
+          countEl.textContent = (baseRevealed + (revealed ? 1 : 0)) + '/' + (baseCards.length + 1) + ' revealed';
+        }
+        sys.stats.codexRepairs += 1;
+        state._v85RepairingCodex = false;
+        return true;
+      } catch (e) { state._v85RepairingCodex = false; log85(e, 'repairCodex'); return false; }
+    }
+
+    function installCodexObserver85() {
+      try {
+        if (typeof MutationObserver === 'undefined' || typeof codexOverlay === 'undefined' || !codexOverlay || codexOverlay.__v85DrownedSunObserver) return;
+        const obs = new MutationObserver(function () {
+          if (state._v85RepairingCodex) return;
+          sys.stats.codexObserverEvents += 1;
+          if (state._v85CodexRepairScheduled) return;
+          state._v85CodexRepairScheduled = true;
+          setTimeout(function () { try { state._v85CodexRepairScheduled = false; repairDrownedSunCodexCard85(); } catch (_) {} }, 0);
+        });
+        obs.observe(codexOverlay, { childList: true, subtree: true });
+        codexOverlay.__v85DrownedSunObserver = obs;
+      } catch (e) { log85(e, 'codexObserver'); }
+    }
+
+    if (typeof updateGame === 'function' && !updateGame.__v85DeepBugfixPass) {
+      const baseUpdate85 = updateGame;
+      updateGame = function updateGameV85(dt) {
+        try { tagBossBullets85(); } catch (_) {}
+        const out = baseUpdate85.apply(this, arguments);
+        try {
+          const room = currentRoom85();
+          if (room) {
+            if (room._v77MajorBossDefeated && room.kind === 'exit' && room.exit && !room.exit.active && !room._v39SunDefeated && !room._v77SunCrater && !room._v77SunReturnSigil && !room._v80DrownedSky && !room._v79DrownedSky) repairStandardBossRoom85(room, 'watchdog');
+            chargeCustomDrownedRoom85(room);
+          }
+          tagBossBullets85();
+        } catch (e) { log85(e, 'update'); }
+        return out;
+      };
+      updateGame.__v85DeepBugfixPass = true;
+    }
+
+    if (typeof renderCodexStats === 'function' && !renderCodexStats.__v85DrownedSunCard) {
+      const baseRenderCodex85 = renderCodexStats;
+      renderCodexStats = function renderCodexStatsV85() {
+        const out = baseRenderCodex85.apply(this, arguments);
+        try { repairDrownedSunCodexCard85(); installCodexObserver85(); } catch (e) { log85(e, 'renderCodexStats'); }
+        return out;
+      };
+      renderCodexStats.__v85DrownedSunCard = true;
+    }
+    if (typeof openCodex === 'function' && !openCodex.__v85DrownedSunCard) {
+      const baseOpenCodex85 = openCodex;
+      openCodex = function openCodexV85() {
+        const out = baseOpenCodex85.apply(this, arguments);
+        try { repairDrownedSunCodexCard85(); installCodexObserver85(); } catch (e) { log85(e, 'openCodex'); }
+        return out;
+      };
+      openCodex.__v85DrownedSunCard = true;
+    }
+
+    // Keep Nadir strict, but deliberately do not scrub unknown future ids.
+    if (typeof safeWriteSave === 'function' && !safeWriteSave.__v85FuturePassengerGuard) {
+      const baseSafeWrite85 = safeWriteSave;
+      safeWriteSave = function safeWriteSaveV85() {
+        const out = baseSafeWrite85.apply(this, arguments);
+        try { sys.stats.futurePassengerPasses += 1; } catch (_) {}
+        return out;
+      };
+      safeWriteSave.__v85FuturePassengerGuard = true;
+    }
+
+    state.v85Debug = function v85Debug() {
+      try { tag85(); } catch (_) {}
+      const room = currentRoom85();
+      return {
+        version: V85_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE85,
+        room: room && {
+          id: room.id,
+          kind: room.kind,
+          cleared: !!room.cleared,
+          exitActive: !!(room.exit && room.exit.active),
+          v77BossId: room._v77MajorBossId || null,
+          v77MajorBossDefeated: !!room._v77MajorBossDefeated,
+          starlessDoors: Array.isArray(room._v71StarlessDoors) ? room._v71StarlessDoors.length : 0,
+          drownedSky: !!room._v80DrownedSky,
+          customClearCharged: !!room._v85CustomClearCharged
+        },
+        anchor: state.v82BlackAnchor && state.v82BlackAnchor.anchor && Object.assign({}, state.v82BlackAnchor.anchor),
+        stats: Object.assign({}, sys.stats),
+        v84: typeof state.v84Debug === 'function' ? state.v84Debug() : null
+      };
+    };
+
+    state.v85SelfTest = function v85SelfTest() {
+      const out = { version: V85_VERSION };
+      const run = function (name, fn) {
+        try { out[name] = fn(); }
+        catch (e) { out[name] = { ok: false, error: String(e && (e.message || e)) }; }
+      };
+      run('boot', function () { const d = state.v85Debug(); return { ok: d.buildTag === V85_VERSION, tag: d.buildTag, cache: d.cacheExpected }; });
+      run('reroll', function () {
+        if (typeof startGame === 'function') startGame('rook');
+        const p = state.player;
+        if (!p || !state.draft) return { ok: false, reason: 'missing player/draft' };
+        p.moonSplinters = 20;
+        state.draft.cards = typeof chooseRandomItems === 'function' ? chooseRandomItems(3) : ['amp','rapid','frame'];
+        state.draft.active = true;
+        state.draft.resolved = false;
+        state.draft.renderKey = '';
+        try { if (typeof renderDraftUI === 'function') renderDraftUI(true); } catch (_) {}
+        const before = state.draft.cards.slice().sort().join('|');
+        const ok = typeof state.v84Reroll === 'function' ? !!state.v84Reroll('selftest') : false;
+        const after = state.draft.cards.slice().sort().join('|');
+        return { ok: ok && before !== after && p.moonSplinters === 15, changed: before !== after, stars: p.moonSplinters, rerolls: state.draft._v76StarRerolls || 0 };
+      });
+      run('wardenRepair', function () {
+        if (typeof state.v71ForceWardenApproach === 'function') state.v71ForceWardenApproach();
+        const level = state.level;
+        const room = currentRoom85();
+        if (!level || !room || !room.exit) return { ok: false, reason: 'missing room' };
+        room.exit.active = false;
+        room.cleared = true;
+        level.cleared = true;
+        room._v77MajorBossDefeated = true;
+        room._v77MajorBossId = 'warden';
+        room._v71StarlessApproachInstalled = false;
+        delete room._v71StarlessDoors;
+        const beforeRooms = Array.isArray(level.rooms) ? level.rooms.length : 0;
+        const repaired = repairStandardBossRoom85(room, 'selftest');
+        const doors = Array.isArray(room._v71StarlessDoors) ? room._v71StarlessDoors.length : 0;
+        return { ok: !!(repaired && room.exit.active && doors > 0), repaired: !!repaired, exitActive: !!room.exit.active, starlessDoors: doors, roomsAdded: (Array.isArray(level.rooms) ? level.rooms.length : 0) - beforeRooms };
+      });
+      run('anchorTouchAim', function () {
+        try { if (typeof state.v81UnlockNadir === 'function') state.v81UnlockNadir(); } catch (_) {}
+        if (typeof startGame === 'function') startGame('nadir');
+        if (typeof input !== 'undefined' && input) {
+          input.mouse = input.mouse || {};
+          input.mouse.seen = false;
+          input.aimTouch = input.aimTouch || {};
+          input.aimTouch.id = 85;
+          input.aimTouch.dx = 0;
+          input.aimTouch.dy = 1;
+        }
+        const p = state.player;
+        if (!p) return { ok: false, reason: 'missing player' };
+        p.aimAngle = Math.PI / 2;
+        if (typeof state.v82ChargeAnchor === 'function') state.v82ChargeAnchor();
+        const px = p.x, py = p.y;
+        const used = typeof state.v82UseBlackAnchor === 'function' ? !!state.v82UseBlackAnchor() : false;
+        const room = currentRoom85();
+        const placed = room && Array.isArray(room._v82BlackAnchors) ? room._v82BlackAnchors[0] : null;
+        return { ok: !!(used && placed && Math.round(placed.x - px) === 0 && Math.round(placed.y - py) > 120), used: used, active: !!placed, dx: placed ? Math.round(placed.x - px) : null, dy: placed ? Math.round(placed.y - py) : null };
+      });
+      run('bulletFlags', function () {
+        if (!Array.isArray(state.bullets) || typeof createBullet !== 'function') return { ok: false, reason: 'no bullet factory' };
+        state.bullets.length = 0;
+        createBullet({ owner: 'enemy', x: 0, y: 0, vx: 1, vy: 0, r: 4.4, life: 3, sourceEnemyType: 'v80DrownedSun', bossSource: true, sourceBoss: true, bossBeam: true, sunRay: true, majorHazard: true });
+        const b = state.bullets[state.bullets.length - 1];
+        return { ok: !!(b && b.bossSource && b.sourceBoss && b.bossBeam && b.sunRay && b.majorHazard && b.r === 4.4), bossSource: !!(b && b.bossSource), sourceBoss: !!(b && b.sourceBoss), bossBeam: !!(b && b.bossBeam), sunRay: !!(b && b.sunRay), majorHazard: !!(b && b.majorHazard), r: b && b.r };
+      });
+      run('codex', function () {
+        state.save = state.save || {};
+        state.save.defeatedBosses = state.save.defeatedBosses || {};
+        state.save.defeatedBosses.drownedSun = true;
+        try { if (typeof openCodex === 'function') openCodex(); } catch (_) {}
+        try { if (typeof renderCodexStats === 'function') renderCodexStats(); } catch (_) {}
+        repairDrownedSunCodexCard85();
+        const deck = typeof codexOverlay !== 'undefined' && codexOverlay && codexOverlay.querySelector && codexOverlay.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector('.v71BossGrid');
+        const countEl = deck && deck.querySelector('.v71BossDeckCount');
+        const cards = grid ? grid.querySelectorAll('.v71BossCard').length : 0;
+        const drowned = !!(grid && grid.querySelector('[data-v85-boss="drownedSun"]'));
+        return { ok: !!(cards >= 7 && drowned), cards: cards, drowned: drowned, text: countEl ? countEl.textContent : '' };
+      });
+      run('customDrownedCharge', function () {
+        try { if (typeof state.v81UnlockNadir === 'function') state.v81UnlockNadir(); } catch (_) {}
+        if (typeof startGame === 'function') startGame('nadir');
+        const room = currentRoom85();
+        const a = state.v82BlackAnchor && state.v82BlackAnchor.anchor;
+        if (!room || !a) return { ok: false, reason: 'missing room/anchor' };
+        room._v80DrownedSky = true;
+        room._v80RoomKind = 'boss';
+        room.hasBoss = true;
+        room.cleared = true;
+        room._v85CustomClearCharged = false;
+        a.charges = 0;
+        a.roomProgress = 0;
+        chargeCustomDrownedRoom85(room);
+        return { ok: !!(room._v85CustomClearCharged && a.charges >= 1), chargedOnce: !!room._v85CustomClearCharged, charges: a.charges, progress: a.roomProgress };
+      });
+      out.ok = Object.keys(out).filter(k => k !== 'version' && k !== 'ok').every(k => out[k] && out[k].ok !== false);
+      return out;
+    };
+
+    try {
+      installCodexObserver85();
+      repairDrownedSunCodexCard85();
+      tag85();
+      setTimeout(function () { try { repairDrownedSunCodexCard85(); tag85(); } catch (_) {} }, 0);
+      setTimeout(function () { try { repairDrownedSunCodexCard85(); tag85(); } catch (_) {} }, 500);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V85_DEEP_BUGFIX_PASS__ = sys;
+        window.noMoonV85Debug = function () { return state.v85Debug(); };
+        window.noMoonV85SelfTest = function () { return state.v85SelfTest(); };
+        window.noMoonV85RepairBossRoom = function () { return repairStandardBossRoom85(currentRoom85(), 'console'); };
+        window.noMoonV85RepairCodex = function () { return repairDrownedSunCodexCard85(); };
+      }
+    } catch (e) { log85(e, 'install'); }
+    state.buildTag = V85_VERSION;
+  })();
+
+
+  // ===================================================================
+  // === v89 — RECOVERY: known-working base after v86-v88 boot crash ===
+  // ===================================================================
+  // Pro's v86 / v87 / v88 stacks shipped Codex repair functions that
+  // mutate the same overlay subtree their MutationObserver watches.
+  // The `repairingCodex8X` re-entrance flag does not save them because
+  // MutationObserver callbacks fire on the microtask queue AFTER the
+  // synchronous repair function returns and clears the flag. Net effect:
+  // every repair mutation queues another observer callback, which queues
+  // another repair, infinitely. Page hangs before the title appears.
+  //
+  // v85 had the loop-breaker (setTimeout(0) deferral, plus a scheduled-
+  // flag check inside the observer). v86 dropped both defenses.
+  //
+  // v89 = Pro's v85 with a version+cache bump. No code changes from v85.
+  // Drops v86 / v87 / v88 entirely. New SW cache name forces Alex's
+  // browser to drop the broken v88 cache.
+  //
+  // What's lost (and worth porting later, one IIFE at a time with browser
+  // verification each step):
+  //   * v86's `chooseDifferent` reroll edge-case (force a different card
+  //     set on tiny item pools)
+  //   * v86 reroll document-capture handler (catches reroll regardless
+  //     of which button id rendered)
+  //   * v87's `closeCustomVictoryExit` + `chargeCustomDrownedClear`
+  //     (gives Nadir/Moots a charge for clearing Drowned Sky rooms)
+  //   * v88's bullet `radius` ↔ `r` normalize defense
+  //   * v88's self-test infrastructure
+  //
+  // Re-add each as a fresh IIFE with explicit MutationObserver disconnect
+  // around any in-overlay write, OR macrotask-deferred (`setTimeout(0)`)
+  // mutation calls.
+  // ===================================================================
+  (function installV89Recovery() {
+    const V89_VERSION = 'qual.recovery-from-v88-codex-loop.2026-05-14.v89';
+    const CACHE89 = 'no-moon-recovery-from-v88-codex-loop-v89';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v89Recovery && state.v89Recovery.installed) return;
+
+    const sys = state.v89Recovery = {
+      installed: true,
+      version: V89_VERSION,
+      cacheExpected: CACHE89,
+      basedOn: 'v85 (Pro deep-bugfix). v86 / v87 / v88 deliberately not applied — they hang on a Codex MutationObserver loop.',
+      stats: { tagged: 0, lastError: null }
+    };
+
+    function tag89() {
+      try {
+        state.buildTag = V89_VERSION;
+        const el = (typeof document !== 'undefined') && document.getElementById('buildTagDisplay');
+        if (el) el.textContent = 'build: ' + V89_VERSION;
+        sys.stats.tagged += 1;
+      } catch (_) {}
+    }
+
+    state.v89Debug = function v89Debug() {
+      tag89();
+      return {
+        version: V89_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE89,
+        basedOn: sys.basedOn,
+        stats: Object.assign({}, sys.stats),
+        v85: typeof state.v85Debug === 'function' ? state.v85Debug() : null,
+        v84: typeof state.v84Debug === 'function' ? state.v84Debug() : null
+      };
+    };
+
+    try {
+      tag89();
+      setTimeout(tag89, 0);
+      setTimeout(tag89, 350);
+      setTimeout(tag89, 1400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V89_RECOVERY__ = sys;
+        window.noMoonV89Debug = function () { return state.v89Debug(); };
+      }
+    } catch (e) { sys.stats.lastError = 'install: ' + (e && e.message || e); }
+    state.buildTag = V89_VERSION;
   })();
 
 
