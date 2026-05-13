@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-drowned-sun-nadir-final-passenger-v81';
+const CACHE_NAME = 'no-moon-nadir-black-anchor-active-v82';
 const ASSETS = [
   './',
   './index.html',

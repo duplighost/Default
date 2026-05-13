@@ -47175,6 +47175,659 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v82 — Nadir's Black Anchor active + mobile perf throttles =====
+  // ===================================================================
+  // 1. Black Anchor: 3.5s gravity well placed at the world mouse cursor
+  //    (capped to 320px from the player). Slows enemy bullets in radius
+  //    by up to 34%, gently pulls non-boss enemies, collapses with a
+  //    damage pulse. Charges by clearing rooms — same model as v68's
+  //    Boon Moots. Only active while playing as Nadir.
+  //
+  //    The HUD slot reuses v68's slot geometry. Moots and Nadir are
+  //    different characters; never coexist in a run; never visually
+  //    collide.
+  //
+  // 2. Mobile perf:
+  //    - spawnSpark count halved on mobile (W < 720)
+  //    - spawnRing rate-limited to ~4/frame on mobile
+  //    - drawAmbientWorld skips every other call on mobile (30fps
+  //      ambient instead of 60fps)
+  //    Toggleable at runtime via state.v82BlackAnchor.config.
+  // ===================================================================
+  (function installV82BlackAnchor() {
+    const V82_VERSION = 'qual.nadir-black-anchor-active.2026-05-14.v82';
+    const CACHE82 = 'no-moon-nadir-black-anchor-active-v82';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v82BlackAnchor && state.v82BlackAnchor.installed) return;
+
+    const TAU82 = (typeof TAU !== 'undefined') ? TAU : Math.PI * 2;
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+
+    const sys = state.v82BlackAnchor = {
+      installed: true,
+      version: V82_VERSION,
+      cacheExpected: CACHE82,
+      config: {
+        RADIUS: 110,
+        LIFE: 3.5,
+        SLOW_MAX: 0.34,
+        SLOW_FLOOR: 0.70,
+        PULL_FORCE_PIXELS: 52,
+        COLLAPSE_DAMAGE: 1.8,
+        COLLAPSE_R_FRAC: 0.72,
+        AIM_CAP_PX: 320,
+        ROOM_NEED: 3,
+        USE_COOLDOWN_AFTER_FIRE: 0.40,
+        KEY: 'e',
+        MOBILE_AMBIENT_SKIP: true,
+        MOBILE_SPARK_HALF: true,
+        MOBILE_RING_LIMIT: 4
+      },
+      anchor: { charges: 1, maxCharges: 1, roomProgress: 0, cooldown: 0, useFlash: 0, hitbox: null },
+      stats: {
+        uses: 0,
+        anchorsExpired: 0,
+        bulletsSlowed: 0,
+        enemiesPulled: 0,
+        collapsePulses: 0,
+        mobileRingsDropped: 0,
+        mobileSparksHalved: 0,
+        mobileAmbientSkips: 0,
+        lastError: null
+      },
+      _ringsThisFrame: 0,
+      _ambientFrame: 0,
+      _lastRingFrameTime: 0
+    };
+
+    function log82(e, where) {
+      const msg = (where || 'v82') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v82]', msg, e); } catch (_) {}
+    }
+    function tag82() { try { state.buildTag = V82_VERSION; } catch (_) {} }
+    function rgba82(hex, a) {
+      try { if (typeof rgba === 'function') return rgba(hex, a); } catch (_) {}
+      let h = String(hex || '#fff').replace('#', '');
+      if (h.length === 3) h = h.split('').map(c => c + c).join('');
+      const n = parseInt(h, 16);
+      if (!Number.isFinite(n)) return 'rgba(255,255,255,' + a + ')';
+      return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+    function isMobile82() { try { return (typeof W !== 'undefined') && W < 720; } catch (_) { return false; } }
+
+    // -----------------------------------------------------------------
+    // Gating
+    // -----------------------------------------------------------------
+    function selectedIsNadir82() {
+      return !!(state.player && state.player.template && state.player.template.id === 'nadir');
+    }
+    function anchorActive82() { return selectedIsNadir82() && state.mode === 'play'; }
+    function anchorReady82() {
+      return anchorActive82() && sys.anchor.charges > 0 && sys.anchor.cooldown <= 0;
+    }
+
+    // -----------------------------------------------------------------
+    // Charge / reset
+    // -----------------------------------------------------------------
+    function chargeAnchor82(amount) {
+      try {
+        if (!anchorActive82()) return;
+        if (sys.anchor.charges >= sys.anchor.maxCharges) {
+          sys.anchor.roomProgress = 0;
+          return;
+        }
+        sys.anchor.roomProgress += Math.max(1, amount | 0);
+        if (sys.anchor.roomProgress >= sys.config.ROOM_NEED) {
+          sys.anchor.roomProgress = 0;
+          sys.anchor.charges = sys.anchor.maxCharges;
+          try { if (typeof pushMessage === 'function') pushMessage('Black Anchor relaced', '#8fdcff', 16, 1.1, 0.16); } catch (_) {}
+        }
+      } catch (e) { log82(e, 'chargeAnchor'); }
+    }
+    function resetBlackAnchor82(toReady) {
+      try {
+        sys.anchor.charges = toReady ? sys.anchor.maxCharges : 0;
+        sys.anchor.roomProgress = 0;
+        sys.anchor.cooldown = 0;
+        sys.anchor.useFlash = 0;
+        sys.anchor.hitbox = null;
+        if (state.level && Array.isArray(state.level.rooms)) {
+          for (const r of state.level.rooms) if (r) r._v82BlackAnchors = [];
+        }
+      } catch (e) { log82(e, 'reset'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Aim target in world coords
+    // -----------------------------------------------------------------
+    function aimTargetWorld82() {
+      try {
+        const p = state.player;
+        if (!p) return null;
+        const cx = (typeof playViewCenterX === 'function') ? playViewCenterX() : (typeof W !== 'undefined' ? W * 0.5 : 0);
+        const cy = (typeof playViewCenterY === 'function') ? playViewCenterY() : (typeof H !== 'undefined' ? H * 0.5 : 0);
+        let mx = p.x, my = p.y;
+        try {
+          if (typeof input !== 'undefined' && input && input.mouse) {
+            mx = N(state.camera.x) - cx + N(input.mouse.x);
+            my = N(state.camera.y) - cy + N(input.mouse.y);
+          }
+        } catch (_) {}
+        // Fallback to aim-angle if mouse coords look wrong
+        if (!Number.isFinite(mx) || !Number.isFinite(my) || (mx === 0 && my === 0)) {
+          const a = N(p.aimAngle);
+          mx = p.x + Math.cos(a) * 180;
+          my = p.y + Math.sin(a) * 180;
+        }
+        const dx = mx - p.x, dy = my - p.y, d = Math.hypot(dx, dy);
+        const cap = N(sys.config.AIM_CAP_PX, 320);
+        if (d <= cap) return { x: mx, y: my };
+        const f = cap / Math.max(1, d);
+        return { x: p.x + dx * f, y: p.y + dy * f };
+      } catch (e) { log82(e, 'aimTarget'); return null; }
+    }
+
+    // -----------------------------------------------------------------
+    // Use the anchor
+    // -----------------------------------------------------------------
+    function useBlackAnchor82() {
+      try {
+        if (!anchorReady82()) {
+          if (anchorActive82()) {
+            try {
+              if (typeof pushMessage === 'function') {
+                const msg = sys.anchor.charges > 0
+                  ? 'Black Anchor is settling'
+                  : ('Black Anchor needs ' + sys.anchor.roomProgress + '/' + sys.config.ROOM_NEED + ' clears');
+                pushMessage(msg, '#8fdcff', 14, 0.9, 0.17);
+              }
+            } catch (_) {}
+          }
+          return false;
+        }
+        const t = aimTargetWorld82();
+        if (!t) return false;
+        const room = (typeof currentRoom === 'function') ? currentRoom() : null;
+        if (!room) return false;
+        room._v82BlackAnchors = [{
+          x: t.x, y: t.y,
+          r: sys.config.RADIUS,
+          t: 0,
+          life: sys.config.LIFE,
+          collapseHold: 0,
+          collapsed: false,
+          seed: Math.random() * 9999
+        }];
+        sys.anchor.charges = 0;
+        sys.anchor.cooldown = sys.config.USE_COOLDOWN_AFTER_FIRE;
+        sys.anchor.useFlash = 1;
+        sys.stats.uses += 1;
+        try { if (typeof spawnRing === 'function') spawnRing(t.x, t.y, '#8fdcff', sys.config.RADIUS * 0.6); } catch (_) {}
+        try {
+          if (typeof spawnSpark === 'function') spawnSpark(t.x, t.y, '#a89bff', 12, 140);
+        } catch (_) {}
+        try {
+          if (typeof playToneBurst === 'function') playToneBurst({ type: 'sine', startFreq: 220, endFreq: 90, duration: 0.42, gain: 0.06, filterFreq: 1400 });
+        } catch (_) {}
+        return true;
+      } catch (e) { log82(e, 'useBlackAnchor'); return false; }
+    }
+
+    // -----------------------------------------------------------------
+    // Per-frame tick (slow / pull / collapse)
+    // -----------------------------------------------------------------
+    function tickBlackAnchors82(dt) {
+      try {
+        if (state.mode !== 'play') return;
+        const room = (typeof currentRoom === 'function') ? currentRoom() : null;
+        if (!room || !Array.isArray(room._v82BlackAnchors) || !room._v82BlackAnchors.length) return;
+        const enemies = state.enemies || [];
+        const bullets = state.bullets || [];
+        for (const a of room._v82BlackAnchors) {
+          if (!a) continue;
+          a.t += dt;
+          if (!a.collapsed) {
+            a.life -= dt;
+            // Slow enemy bullets in radius
+            for (const b of bullets) {
+              if (!b || b.owner !== 'enemy') continue;
+              if (b.bossBeam || b.sunRay || b.majorHazard) continue;
+              if (b.r && b.r > 12) continue;
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const d = Math.hypot(dx, dy);
+              if (d < a.r) {
+                const slow = 1 - N(sys.config.SLOW_MAX, 0.34) * (1 - d / a.r);
+                const floor = N(sys.config.SLOW_FLOOR, 0.70);
+                const factor = Math.max(floor, slow);
+                b.vx *= factor;
+                b.vy *= factor;
+                sys.stats.bulletsSlowed += 1;
+              }
+            }
+            // Pull non-boss enemies
+            for (const e of enemies) {
+              if (!e || e.boss || e.remove) continue;
+              const dx = a.x - e.x, dy = a.y - e.y, d = Math.hypot(dx, dy);
+              if (d > 0 && d < a.r) {
+                const force = N(sys.config.PULL_FORCE_PIXELS, 52) * (1 - d / a.r);
+                e.vx = N(e.vx) + (dx / d) * force * dt;
+                e.vy = N(e.vy) + (dy / d) * force * dt;
+                sys.stats.enemiesPulled += 1;
+              }
+            }
+            if (a.life <= 0) {
+              a.collapsed = true;
+              a.collapseHold = 0.36;
+              sys.stats.collapsePulses += 1;
+              sys.stats.anchorsExpired += 1;
+              try { if (typeof spawnRing === 'function') spawnRing(a.x, a.y, '#8fdcff', a.r); } catch (_) {}
+              const cr = a.r * N(sys.config.COLLAPSE_R_FRAC, 0.72);
+              for (const e of enemies) {
+                if (!e || e.boss || e.remove) continue;
+                const d = Math.hypot(e.x - a.x, e.y - a.y);
+                if (d < cr) {
+                  try { if (typeof damageEnemy === 'function') damageEnemy(e, N(sys.config.COLLAPSE_DAMAGE, 1.8), null); } catch (_) {}
+                }
+              }
+            }
+          } else {
+            a.collapseHold -= dt;
+          }
+        }
+        // GC collapsed anchors after their post-collapse hold expires
+        room._v82BlackAnchors = room._v82BlackAnchors.filter(a => !a.collapsed || a.collapseHold > -0.05);
+      } catch (e) { log82(e, 'tickAnchors'); }
+    }
+
+    // -----------------------------------------------------------------
+    // World drawing
+    // -----------------------------------------------------------------
+    function drawAnchor82(a) {
+      try {
+        const t = N(state.time);
+        const fade = a.collapsed ? Math.max(0, a.collapseHold / 0.36) : Math.min(1, a.t / 0.20);
+        const lifePct = a.collapsed ? 0 : Math.max(0, Math.min(1, a.life / N(sys.config.LIFE, 3.5)));
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        // Dark void
+        ctx.fillStyle = 'rgba(0,0,0,' + (0.86 * fade).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(0, 0, a.r * 0.62, 0, TAU82); ctx.fill();
+        // Inner radial gradient void
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, a.r);
+        grad.addColorStop(0, 'rgba(0,0,0,' + (0.92 * fade).toFixed(3) + ')');
+        grad.addColorStop(0.55, rgba82('#3a1a8a', 0.40 * fade));
+        grad.addColorStop(0.92, rgba82('#8fdcff', 0.16 * fade));
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(0, 0, a.r, 0, TAU82); ctx.fill();
+        // Outer rim (violet/cyan)
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.strokeStyle = rgba82('#a89bff', 0.62 * fade);
+        ctx.lineWidth = 2;
+        ctx.setLineDash([10, 6]);
+        ctx.lineDashOffset = -t * 14;
+        ctx.beginPath(); ctx.arc(0, 0, a.r * 0.95, 0, TAU82); ctx.stroke();
+        ctx.setLineDash([]);
+        // Pulsing pre-collapse warning ring
+        if (!a.collapsed && lifePct < 0.30) {
+          const pulse = (1 - lifePct / 0.30);
+          ctx.strokeStyle = rgba82('#ffffff', 0.42 * pulse);
+          ctx.lineWidth = 2 + pulse * 2;
+          ctx.beginPath(); ctx.arc(0, 0, a.r * (0.95 + pulse * 0.08), 0, TAU82); ctx.stroke();
+        }
+        // Inward dust streams
+        const dustCount = isMobile82() ? 10 : 22;
+        for (let i = 0; i < dustCount; i++) {
+          const phase = (a.seed + i * 41) % 100 / 100;
+          const ang = (i / dustCount) * TAU82 + t * 0.6 + phase * 0.4;
+          const dist = a.r * (1 - ((t * 0.6 + phase) % 1));
+          if (dist < a.r * 0.20) continue;
+          ctx.fillStyle = rgba82(i % 3 === 0 ? '#ffffff' : '#8fdcff', (0.42 + 0.36 * (1 - dist / a.r)) * fade);
+          ctx.beginPath(); ctx.arc(Math.cos(ang) * dist, Math.sin(ang) * dist, 1.5, 0, TAU82); ctx.fill();
+        }
+        ctx.restore();
+        // Collapse flash
+        if (a.collapsed && a.collapseHold > 0) {
+          const f = a.collapseHold / 0.36;
+          ctx.strokeStyle = rgba82('#ffffff', 0.66 * f);
+          ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(0, 0, a.r * (1 + (1 - f) * 0.3), 0, TAU82); ctx.stroke();
+        }
+        ctx.restore();
+      } catch (e) { log82(e, 'drawAnchor'); }
+    }
+    function drawBlackAnchorsWorld82() {
+      try {
+        const room = (typeof currentRoom === 'function') ? currentRoom() : null;
+        if (!room || !Array.isArray(room._v82BlackAnchors) || !room._v82BlackAnchors.length) return;
+        for (const a of room._v82BlackAnchors) drawAnchor82(a);
+      } catch (e) { log82(e, 'drawAnchorsWorld'); }
+    }
+
+    // -----------------------------------------------------------------
+    // HUD slot — reuses v68's slot layout
+    // -----------------------------------------------------------------
+    function drawBlackAnchorSlot82() {
+      try {
+        if (!anchorActive82()) { sys.anchor.hitbox = null; return; }
+        let slot = null;
+        try {
+          if (state.v56ExpressiveSystems && typeof state.v56ExpressiveSystems.computeV56ActiveSlotLayout === 'function') {
+            slot = state.v56ExpressiveSystems.computeV56ActiveSlotLayout();
+          }
+        } catch (_) {}
+        if (!slot) {
+          const compact = isMobile82();
+          slot = {
+            x: compact ? 12 : 16,
+            y: compact ? Math.max(104, (typeof H !== 'undefined' ? H : 600) - 174) : 138,
+            w: compact ? 124 : 164,
+            h: compact ? 48 : 54,
+            compact: compact
+          };
+        }
+        const x = slot.x, y = slot.y, w = slot.w, h = slot.h;
+        const ready = anchorReady82();
+        const charge = Math.max(0, Math.min(1, sys.anchor.charges / Math.max(1, sys.anchor.maxCharges)));
+        const lace = Math.max(0, Math.min(1, sys.anchor.roomProgress / Math.max(1, sys.config.ROOM_NEED)));
+        const flash = Math.max(0, Math.min(1, sys.anchor.useFlash));
+        sys.anchor.hitbox = { x: x, y: y, w: w, h: h };
+        ctx.save();
+        if (typeof DPR !== 'undefined') ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        const alpha = typeof hudOcclusionAlpha === 'function' ? hudOcclusionAlpha(x, y, w, h, 0.58, 0.95) : 0.9;
+        ctx.globalAlpha = alpha;
+        try {
+          if (typeof drawHudGlassPanel === 'function') drawHudGlassPanel(x, y, w, h, ready ? '#8fdcff' : '#5a4ab8', alpha, 16);
+          else {
+            ctx.fillStyle = 'rgba(5,8,18,.84)';
+            ctx.beginPath();
+            ctx.rect(x, y, w, h);
+            ctx.fill();
+          }
+        } catch (_) {
+          ctx.fillStyle = 'rgba(5,8,18,.84)';
+          ctx.beginPath();
+          ctx.rect(x, y, w, h);
+          ctx.fill();
+        }
+        // Inner cyan glow when ready
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = (ready ? 0.16 : 0.05) + flash * 0.20;
+        ctx.fillStyle = ready ? 'rgba(143,220,255,.62)' : 'rgba(90,74,184,.30)';
+        ctx.beginPath();
+        ctx.rect(x + 2, y + 2, w - 4, h - 4);
+        ctx.fill();
+        ctx.restore();
+        // Border
+        ctx.strokeStyle = ready ? 'rgba(189,231,255,.66)' : 'rgba(143,134,220,.28)';
+        ctx.lineWidth = ready ? 1.7 : 1.1;
+        ctx.beginPath();
+        ctx.rect(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.stroke();
+        // Icon (small dark disc with cyan halo + orbit ring)
+        const iconX = x + 18, iconY = y + h * 0.52;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const haloGrad = ctx.createRadialGradient(iconX, iconY, 0, iconX, iconY, 14);
+        haloGrad.addColorStop(0, ready ? 'rgba(189,231,255,.66)' : 'rgba(143,134,220,.34)');
+        haloGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = haloGrad;
+        ctx.beginPath(); ctx.arc(iconX, iconY, 14, 0, TAU82); ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = '#020308';
+        ctx.beginPath(); ctx.arc(iconX, iconY, 7, 0, TAU82); ctx.fill();
+        ctx.strokeStyle = ready ? 'rgba(189,231,255,.86)' : 'rgba(143,134,220,.46)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(iconX, iconY, 11, 5, (N(state.time) * 0.5), 0, TAU82);
+        ctx.stroke();
+        // Labels
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = '900 ' + (slot.compact ? 9 : 10) + 'px Inter, system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(241,248,255,.92)';
+        ctx.fillText('BLACK ANCHOR', x + 34, y + (slot.compact ? h * 0.38 : h * 0.36));
+        ctx.font = '800 ' + (slot.compact ? 8 : 9) + 'px Inter, system-ui, sans-serif';
+        ctx.fillStyle = ready ? 'rgba(207,242,255,.94)' : 'rgba(189,180,235,.74)';
+        const label = ready ? 'E / TAP TO PLACE' : ('LACING ' + sys.anchor.roomProgress + '/' + sys.config.ROOM_NEED);
+        ctx.fillText(label, x + 34, y + (slot.compact ? h * 0.67 : h * 0.66));
+        // Progress bar
+        ctx.globalAlpha *= 0.8;
+        ctx.fillStyle = 'rgba(255,255,255,.08)';
+        ctx.beginPath();
+        ctx.rect(x + 34, y + h - 9, w - 48, 4);
+        ctx.fill();
+        ctx.fillStyle = ready ? 'rgba(189,231,255,.78)' : 'rgba(143,134,220,.62)';
+        ctx.beginPath();
+        ctx.rect(x + 34, y + h - 9, (w - 48) * (ready ? charge : lace), 4);
+        ctx.fill();
+        ctx.restore();
+      } catch (e) { log82(e, 'drawSlot'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Wraps
+    // -----------------------------------------------------------------
+    if (typeof updateGame === 'function' && !updateGame.__v82BlackAnchor) {
+      const baseUpdate82 = updateGame;
+      updateGame = function updateGameV82(dt) {
+        const out = baseUpdate82.apply(this, arguments);
+        try {
+          const d = N(dt);
+          sys.anchor.cooldown = Math.max(0, sys.anchor.cooldown - d);
+          sys.anchor.useFlash = Math.max(0, sys.anchor.useFlash - d * 2.6);
+          if (d > 0) tickBlackAnchors82(d);
+          // Reset per-frame mobile ring counter
+          sys._ringsThisFrame = 0;
+        } catch (e) { log82(e, 'updateGame'); }
+        return out;
+      };
+      updateGame.__v82BlackAnchor = true;
+    }
+    if (typeof drawHUD === 'function' && !drawHUD.__v82BlackAnchor) {
+      const baseDrawHUD82 = drawHUD;
+      drawHUD = function drawHUDV82() {
+        const out = baseDrawHUD82.apply(this, arguments);
+        try { drawBlackAnchorSlot82(); } catch (e) { log82(e, 'drawHUD'); }
+        return out;
+      };
+      drawHUD.__v82BlackAnchor = true;
+    }
+    if (typeof renderWorld === 'function' && !renderWorld.__v82BlackAnchor) {
+      const baseRender82 = renderWorld;
+      renderWorld = function renderWorldV82() {
+        const out = baseRender82.apply(this, arguments);
+        try {
+          ctx.save();
+          ctx.translate(-state.camera.x + (typeof playViewCenterX === 'function' ? playViewCenterX() : (typeof W !== 'undefined' ? W * 0.5 : 0)),
+                        -state.camera.y + (typeof playViewCenterY === 'function' ? playViewCenterY() : (typeof H !== 'undefined' ? H * 0.5 : 0)));
+          drawBlackAnchorsWorld82();
+          ctx.restore();
+        } catch (e) { log82(e, 'renderWorld'); }
+        return out;
+      };
+      renderWorld.__v82BlackAnchor = true;
+    }
+    if (typeof setRoomCleared === 'function' && !setRoomCleared.__v82BlackAnchor) {
+      const baseSetRoom82 = setRoomCleared;
+      setRoomCleared = function setRoomClearedV82(level, room) {
+        const wasCleared = !!(room && room.cleared);
+        const hadFoes = !!(room && (room.hasBoss || (Array.isArray(room.enemies) && room.enemies.length > 0)));
+        const out = baseSetRoom82.apply(this, arguments);
+        try {
+          if (room && room.cleared && !wasCleared && hadFoes) chargeAnchor82(room.hasBoss ? 3 : 1);
+        } catch (e) { log82(e, 'setRoomCleared'); }
+        return out;
+      };
+      setRoomCleared.__v82BlackAnchor = true;
+    }
+    if (typeof startGame === 'function' && !startGame.__v82BlackAnchor) {
+      const baseStartGame82 = startGame;
+      startGame = function startGameV82(charId) {
+        const out = baseStartGame82.apply(this, arguments);
+        try { resetBlackAnchor82(selectedIsNadir82()); } catch (e) { log82(e, 'startGame'); }
+        return out;
+      };
+      startGame.__v82BlackAnchor = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Input — canvas pointerdown (hitbox) + window keydown ('e')
+    // -----------------------------------------------------------------
+    if (typeof canvas !== 'undefined' && canvas && !canvas.__v82BlackAnchorInput) {
+      const useFromPointer = function (ev) {
+        try {
+          if (!anchorActive82() || !sys.anchor.hitbox) return;
+          const rect = canvas.getBoundingClientRect();
+          const x = (ev.clientX - rect.left) * (canvas.width / (typeof DPR !== 'undefined' ? DPR : 1)) / Math.max(1, rect.width);
+          const y = (ev.clientY - rect.top) * (canvas.height / (typeof DPR !== 'undefined' ? DPR : 1)) / Math.max(1, rect.height);
+          const b = sys.anchor.hitbox;
+          if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+            if (useBlackAnchor82()) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              return false;
+            }
+          }
+        } catch (e) { log82(e, 'pointerInput'); }
+      };
+      canvas.addEventListener('pointerdown', useFromPointer, { capture: true, passive: false });
+      canvas.addEventListener('touchstart', function (ev) {
+        try {
+          const t = ev.touches && ev.touches[0];
+          if (t) useFromPointer({ clientX: t.clientX, clientY: t.clientY, preventDefault: () => ev.preventDefault(), stopPropagation: () => ev.stopPropagation() });
+        } catch (_) {}
+      }, { capture: true, passive: false });
+      canvas.__v82BlackAnchorInput = true;
+    }
+    if (typeof window !== 'undefined' && !window.__NO_MOON_V82_KEY_INPUT__) {
+      window.addEventListener('keydown', function (ev) {
+        try {
+          const key = String(sys.config.KEY || 'e').toLowerCase();
+          if ((String(ev.key).toLowerCase() === key) && anchorActive82()) {
+            if (useBlackAnchor82()) {
+              ev.preventDefault();
+              ev.stopPropagation();
+            }
+          }
+        } catch (e) { log82(e, 'keyInput'); }
+      }, { capture: true });
+      window.__NO_MOON_V82_KEY_INPUT__ = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Mobile perf — particle throttles + ambient signature skip
+    // -----------------------------------------------------------------
+    if (typeof spawnSpark === 'function' && !spawnSpark.__v82Mobile) {
+      const baseSpark82 = spawnSpark;
+      spawnSpark = function spawnSparkV82(x, y, color, count, speed) {
+        try {
+          if (sys.config.MOBILE_SPARK_HALF && isMobile82() && Number.isFinite(+count) && count > 1) {
+            count = Math.max(1, Math.floor(count * 0.5));
+            sys.stats.mobileSparksHalved += 1;
+          }
+        } catch (_) {}
+        return baseSpark82.call(this, x, y, color, count, speed);
+      };
+      spawnSpark.__v82Mobile = true;
+    }
+    if (typeof spawnRing === 'function' && !spawnRing.__v82Mobile) {
+      const baseRing82 = spawnRing;
+      spawnRing = function spawnRingV82(x, y, color, radius) {
+        try {
+          if (isMobile82() && Number(sys.config.MOBILE_RING_LIMIT) > 0) {
+            const t = N(state.time);
+            if (t !== sys._lastRingFrameTime) {
+              sys._ringsThisFrame = 0;
+              sys._lastRingFrameTime = t;
+            }
+            if (sys._ringsThisFrame >= sys.config.MOBILE_RING_LIMIT) {
+              sys.stats.mobileRingsDropped += 1;
+              return;
+            }
+            sys._ringsThisFrame += 1;
+          }
+        } catch (_) {}
+        return baseRing82.call(this, x, y, color, radius);
+      };
+      spawnRing.__v82Mobile = true;
+    }
+    if (typeof drawAmbientWorld === 'function' && !drawAmbientWorld.__v82Mobile) {
+      const baseAmbient82 = drawAmbientWorld;
+      drawAmbientWorld = function drawAmbientWorldV82(level) {
+        try {
+          if (sys.config.MOBILE_AMBIENT_SKIP && isMobile82()) {
+            sys._ambientFrame = (sys._ambientFrame + 1) | 0;
+            if ((sys._ambientFrame & 1) === 0) {
+              sys.stats.mobileAmbientSkips += 1;
+              return;
+            }
+          }
+        } catch (_) {}
+        return baseAmbient82.apply(this, arguments);
+      };
+      drawAmbientWorld.__v82Mobile = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Debug
+    // -----------------------------------------------------------------
+    state.v82Debug = function v82Debug() {
+      try {
+        const room = (typeof currentRoom === 'function') ? currentRoom() : null;
+        return {
+          version: V82_VERSION,
+          buildTag: state.buildTag,
+          cacheExpected: CACHE82,
+          isNadir: selectedIsNadir82(),
+          anchorActive: anchorActive82(),
+          anchorReady: anchorReady82(),
+          anchor: Object.assign({}, sys.anchor, { hitbox: sys.anchor.hitbox ? Object.assign({}, sys.anchor.hitbox) : null }),
+          roomAnchors: room && Array.isArray(room._v82BlackAnchors)
+            ? room._v82BlackAnchors.map(a => ({ x: a.x, y: a.y, r: a.r, life: a.life, collapsed: !!a.collapsed }))
+            : [],
+          isMobile: isMobile82(),
+          mobileAmbientSkip: !!sys.config.MOBILE_AMBIENT_SKIP,
+          mobileSparkHalf: !!sys.config.MOBILE_SPARK_HALF,
+          mobileRingLimit: N(sys.config.MOBILE_RING_LIMIT),
+          stats: Object.assign({}, sys.stats),
+          v81: typeof state.v81Debug === 'function' ? state.v81Debug() : null
+        };
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+    state.v82UseBlackAnchor = useBlackAnchor82;
+    state.v82ChargeAnchor = function () {
+      sys.anchor.charges = sys.anchor.maxCharges;
+      sys.anchor.roomProgress = 0;
+      sys.anchor.cooldown = 0;
+      return state.v82Debug();
+    };
+
+    // -----------------------------------------------------------------
+    // Install
+    // -----------------------------------------------------------------
+    try {
+      tag82();
+      setTimeout(tag82, 0);
+      setTimeout(tag82, 350);
+      setTimeout(tag82, 1400);
+      // If a run is already in progress and Nadir is the player, give a charge.
+      if (selectedIsNadir82()) resetBlackAnchor82(true);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V82_BLACK_ANCHOR__ = sys;
+        window.noMoonV82Debug = function () { return state.v82Debug(); };
+        window.noMoonV82ChargeAnchor = function () { return state.v82ChargeAnchor(); };
+        window.noMoonV82UseAnchor = function () { return useBlackAnchor82(); };
+      }
+    } catch (e) { log82(e, 'install'); }
+    state.buildTag = V82_VERSION;
+  })();
+
+
   renderCodexStats();
 
 })();
