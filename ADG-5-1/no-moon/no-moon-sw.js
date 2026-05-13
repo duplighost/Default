@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-pro-hardening-anchor-unlock-v83';
+const CACHE_NAME = 'no-moon-claude-followup-bugfixes-v84';
 const ASSETS = [
   './',
   './index.html',

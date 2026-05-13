@@ -953,6 +953,7 @@
 <button id="musicToggle" type="button" aria-label="Toggle background music" data-on="0">BGM OFF</button>
 
 <script>
+
 (() => {
   'use strict';
 
@@ -49010,10 +49011,324 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v84 — Claude bug-fix pass on top of Pro's v83 hardening =======
+  // ===================================================================
+  // Addresses 6 bugs from /BUG_REPORT_FOR_PRO_v83.md:
+  //   1. Boss-death over-clear: v77 makeMajorBossRoomSafe77 sets
+  //      room.cleared = true directly, bypassing setRoomCleared. Result:
+  //      room.exit.active never set (softlock-risk), v71 starless-door
+  //      install wrap never fires (the Warden room's secret door + Ferry
+  //      teleporter never spawn), v68 Boon Moots gets no charge on boss
+  //      kills. We wrap killEnemy outermost; after a major boss dies,
+  //      if room.cleared is set but the cascade didn't fire, run it.
+  //   2. Reroll click never fires: v78 binds btn.onpointerdown {
+  //      preventDefault() } which cancels the synthetic click. We
+  //      clear the broken handler after every draft render.
+  //   3. Black Anchor trivializes boss bullets: v82 checks for flags
+  //      (bossBeam / sunRay / majorHazard) that nothing in the codebase
+  //      sets. While a major boss is alive, we tag fresh enemy bullets
+  //      with bossBeam so v82's anchor skips them.
+  //   4. Mobile anchor placement: v82 reads input.mouse which never
+  //      updates on touch (default stays at W/2, H/2). On mobile, the
+  //      anchor always lands at screen center. We rewrite input.mouse
+  //      to "200px ahead of player in aim direction" on any
+  //      touch-input session (input.mouse.seen === false) so v82's
+  //      aim derivation produces a sensible world point.
+  //   5. Codex boss-card count desync: v71 sometimes re-renders the
+  //      deck without going through the wrapped openCodex/renderCodexStats,
+  //      leaving the Drowned Sun card unappended and the count text
+  //      stuck at X/6. MutationObserver re-appends + re-writes the
+  //      count whenever the deck mutates.
+  //   6. Moots evidence cleanup: v75's evidence75 still treats
+  //      highestBiomeReached >= 10 as a Moots unlock signal. v78 scrubs
+  //      after but leaves a stale in-memory window. Per-frame backup
+  //      scrub here so the wrong value never persists past one frame.
+  // ===================================================================
+  (function installV84ClaudeFollowUp() {
+    const V84_VERSION = 'qual.claude-followup-bugfixes.2026-05-14.v84';
+    const CACHE84 = 'no-moon-claude-followup-bugfixes-v84';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v84ClaudeFollowUp && state.v84ClaudeFollowUp.installed) return;
+
+    const sys = state.v84ClaudeFollowUp = {
+      installed: true,
+      version: V84_VERSION,
+      cacheExpected: CACHE84,
+      stats: {
+        bossExitFixes: 0,
+        rerollPointerdownCleared: 0,
+        bossBulletsTagged: 0,
+        mobileAimRewrites: 0,
+        codexDrownedSunAppends: 0,
+        codexCountRewrites: 0,
+        mootsScrubs: 0,
+        lastError: null
+      }
+    };
+
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    const MAJOR_BOSS_TYPES = ['warden', 'archon', 'sunCore', 'v59NightFerry', 'v80DrownedSun', 'v79DrownedSun'];
+
+    function log84(e, where) {
+      const msg = (where || 'v84') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v84]', msg, e); } catch (_) {}
+    }
+    function tag84() { try { state.buildTag = V84_VERSION; } catch (_) {} }
+    function isMajorBoss84(enemy) {
+      if (!enemy) return false;
+      const id = String(enemy.typeId || '');
+      return MAJOR_BOSS_TYPES.indexOf(id) !== -1;
+    }
+
+    // -----------------------------------------------------------------
+    // FIX 1: Boss-death over-clear — run setRoomCleared cascade
+    //        after v77 has flagged the room safe.
+    // -----------------------------------------------------------------
+    if (typeof killEnemy === 'function' && !killEnemy.__v84BossExitFix) {
+      const baseKill84 = killEnemy;
+      killEnemy = function killEnemyV84(enemy, bullet) {
+        const isMajor = isMajorBoss84(enemy) && !enemy.remove;
+        const out = baseKill84.apply(this, arguments);
+        if (isMajor) {
+          try {
+            const room = (typeof currentRoom === 'function') ? currentRoom() : null;
+            const level = state.level;
+            // If v77's over-clear ran (room.cleared = true) but the cascade
+            // never fired (exit.active is still false), run it now.
+            if (
+              room && level &&
+              room.cleared &&
+              room.exit &&
+              room.exit.active === false &&
+              typeof setRoomCleared === 'function'
+            ) {
+              // setRoomCleared internally re-sets room.cleared / level.cleared
+              // (no-op), then runs the exit.active = true, plays the bellway
+              // sound, pushes the BELLWAY CLEAR / THRONE SHATTERED message,
+              // triggers v71's wrap (starless doors install on Warden room),
+              // and triggers v68's wrap (Boon Moots charge).
+              setRoomCleared(level, room);
+              sys.stats.bossExitFixes += 1;
+            }
+          } catch (e) { log84(e, 'killEnemy bossExitFix'); }
+        }
+        return out;
+      };
+      killEnemy.__v84BossExitFix = true;
+    }
+
+    // -----------------------------------------------------------------
+    // FIX 2: Reroll button — clear v78's broken onpointerdown handler
+    //        after every draft re-render.
+    // -----------------------------------------------------------------
+    if (typeof renderDraftUI === 'function' && !renderDraftUI.__v84RerollFix) {
+      const baseDraft84 = renderDraftUI;
+      renderDraftUI = function renderDraftUIV84() {
+        const out = baseDraft84.apply(this, arguments);
+        try {
+          const btn = document.getElementById('v78RerollBtn');
+          if (btn && btn.onpointerdown) {
+            btn.onpointerdown = null;
+            sys.stats.rerollPointerdownCleared += 1;
+          }
+        } catch (e) { log84(e, 'rerollFix'); }
+        return out;
+      };
+      renderDraftUI.__v84RerollFix = true;
+    }
+
+    // -----------------------------------------------------------------
+    // FIX 3: Tag enemy bullets with bossBeam while a major boss is alive,
+    //        so v82's Black Anchor skips them.
+    // -----------------------------------------------------------------
+    if (typeof updateGame === 'function' && !updateGame.__v84BossBulletTag) {
+      const baseUpdate84 = updateGame;
+      updateGame = function updateGameV84(dt) {
+        const out = baseUpdate84.apply(this, arguments);
+        try {
+          if (state.mode === 'play' && Array.isArray(state.bullets) && Array.isArray(state.enemies)) {
+            const room = (typeof currentRoom === 'function') ? currentRoom() : null;
+            const bossAlive = state.enemies.some(function (e) { return e && e.boss && !e.remove; });
+            if (bossAlive) {
+              for (const b of state.bullets) {
+                if (!b || b.owner !== 'enemy' || b._v84Tagged) continue;
+                b._v84Tagged = true;
+                b.bossBeam = true;
+                sys.stats.bossBulletsTagged += 1;
+              }
+            }
+          }
+        } catch (e) { log84(e, 'bulletTag'); }
+        return out;
+      };
+      updateGame.__v84BossBulletTag = true;
+    }
+
+    // -----------------------------------------------------------------
+    // FIX 4: Mobile Black Anchor aim — rewrite input.mouse to a
+    //        sensible "aim-ahead" world point on touch sessions.
+    // -----------------------------------------------------------------
+    function rewriteMouseToAim84(ev) {
+      try {
+        if (!state.player || !state.player.template || state.player.template.id !== 'nadir') return;
+        if (state.mode !== 'play') return;
+        if (typeof input === 'undefined' || !input || !input.mouse) return;
+        // Desktop mouse already tracked correctly.
+        if (input.mouse.seen) return;
+        // Touch session — replace input.mouse with screen-space position
+        // 200 px ahead of the player in their current aim direction.
+        const p = state.player;
+        const a = N(p.aimAngle);
+        const cx = (typeof playViewCenterX === 'function') ? playViewCenterX() : (typeof W !== 'undefined' ? W * 0.5 : 0);
+        const cy = (typeof playViewCenterY === 'function') ? playViewCenterY() : (typeof H !== 'undefined' ? H * 0.5 : 0);
+        const worldX = p.x + Math.cos(a) * 200;
+        const worldY = p.y + Math.sin(a) * 200;
+        input.mouse.x = worldX - state.camera.x + cx;
+        input.mouse.y = worldY - state.camera.y + cy;
+        sys.stats.mobileAimRewrites += 1;
+      } catch (e) { log84(e, 'mobileAim'); }
+    }
+    try {
+      // document-capture so we fire BEFORE v82's canvas capture handler.
+      document.addEventListener('pointerdown', rewriteMouseToAim84, { capture: true, passive: true });
+      document.addEventListener('touchstart', rewriteMouseToAim84, { capture: true, passive: true });
+    } catch (e) { log84(e, 'bindMobileAim'); }
+
+    // -----------------------------------------------------------------
+    // FIX 5: Codex boss-card count desync — MutationObserver on the
+    //        codex overlay re-appends the Drowned Sun card + rewrites
+    //        the count text whenever the deck mutates without v81 hitting it.
+    // -----------------------------------------------------------------
+    function appendDrownedSunCard84(grid) {
+      try {
+        if (!grid || grid.querySelector('[data-v81-boss="drownedSun"]')) return false;
+        const save = state.save || {};
+        const db = save.defeatedBosses || {};
+        let mirror = {};
+        try { mirror = JSON.parse(localStorage.getItem('noMoonProgress_v68') || '{}') || {}; } catch (_) {}
+        const mdb = mirror.defeatedBosses || {};
+        const defeated = !!db.drownedSun || !!mdb.drownedSun;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.v81Boss = 'drownedSun';
+        btn.className = defeated ? 'v71BossCard revealed' : 'v71BossCard locked';
+        btn.setAttribute('aria-label', defeated ? 'Drowned Sun defeated' : 'Sealed defeated-boss card');
+        btn.innerHTML = defeated
+          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
+          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
+        grid.appendChild(btn);
+        sys.stats.codexDrownedSunAppends += 1;
+        // Rewrite the count text on the parent .v71BossDeck.
+        const deck = grid.closest ? grid.closest('.v71BossDeck') : null;
+        const countEl = deck && deck.querySelector ? deck.querySelector('.v71BossDeckCount') : null;
+        if (countEl) {
+          const m = String(countEl.textContent || '').match(/(\d+)\s*\/\s*(\d+)\s+revealed/i);
+          if (m) {
+            let num = N(m[1]);
+            const den = N(m[2]) + 1;
+            if (defeated) num += 1;
+            countEl.textContent = num + '/' + den + ' revealed';
+            sys.stats.codexCountRewrites += 1;
+          }
+        }
+        return true;
+      } catch (e) { log84(e, 'appendDrownedSun'); return false; }
+    }
+    try {
+      const codexEl = (typeof codexOverlay !== 'undefined') ? codexOverlay : null;
+      if (codexEl && typeof MutationObserver !== 'undefined' && !codexEl.__v84CodexObserver) {
+        const mo = new MutationObserver(function (records) {
+          try {
+            for (const r of records) {
+              if (!r || !r.target) continue;
+              const grid = r.target.classList && r.target.classList.contains('v71BossGrid')
+                ? r.target
+                : (typeof r.target.querySelector === 'function' ? r.target.querySelector('.v71BossGrid') : null);
+              if (grid) appendDrownedSunCard84(grid);
+            }
+            // Also check the whole overlay once per batch — covers cases
+            // where the mutation target is the panel, not the grid.
+            const liveGrid = codexEl.querySelector ? codexEl.querySelector('.v71BossGrid') : null;
+            if (liveGrid) appendDrownedSunCard84(liveGrid);
+          } catch (e) { log84(e, 'mutationCallback'); }
+        });
+        mo.observe(codexEl, { childList: true, subtree: true });
+        codexEl.__v84CodexObserver = mo;
+      }
+    } catch (e) { log84(e, 'codexObserverInstall'); }
+
+    // -----------------------------------------------------------------
+    // FIX 6: Moots evidence cleanup — scrub the false unlock that v75's
+    //        evidence75 still produces from highestBiomeReached.
+    // -----------------------------------------------------------------
+    function scrubMoots84() {
+      try {
+        if (!state.save || !state.save.unlockedCharacters) return false;
+        if (state.save.unlockedCharacters.moots !== true) return false;
+        const lt = state.save.lifetime || {};
+        const v = state.save.victories || {};
+        const ach = state.save.achievements || {};
+        const strict = N(lt.wins) > 0 || N(v.routeClears) > 0 || !!(ach.wins_1 && ach.wins_1.unlocked);
+        if (!strict) {
+          state.save.unlockedCharacters.moots = false;
+          sys.stats.mootsScrubs += 1;
+          return true;
+        }
+        return false;
+      } catch (e) { log84(e, 'scrubMoots'); return false; }
+    }
+    // Run on safeWriteSave PRE so the persisted save never holds a false unlock.
+    if (typeof safeWriteSave === 'function' && !safeWriteSave.__v84MootsScrub) {
+      const baseSafeWrite84 = safeWriteSave;
+      safeWriteSave = function safeWriteSaveV84() {
+        try { scrubMoots84(); } catch (e) { log84(e, 'preSafeWrite'); }
+        return baseSafeWrite84.apply(this, arguments);
+      };
+      safeWriteSave.__v84MootsScrub = true;
+    }
+    // Also run on renderCharacterCards so the card UI never reflects a false unlock.
+    if (typeof renderCharacterCards === 'function' && !renderCharacterCards.__v84MootsScrub) {
+      const baseCards84 = renderCharacterCards;
+      renderCharacterCards = function renderCharacterCardsV84() {
+        try { scrubMoots84(); } catch (_) {}
+        return baseCards84.apply(this, arguments);
+      };
+      renderCharacterCards.__v84MootsScrub = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Debug
+    // -----------------------------------------------------------------
+    state.v84Debug = function v84Debug() {
+      return {
+        version: V84_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE84,
+        stats: Object.assign({}, sys.stats),
+        v83: typeof state.v83Debug === 'function' ? state.v83Debug() : null
+      };
+    };
+
+    try {
+      tag84();
+      setTimeout(tag84, 0);
+      setTimeout(tag84, 350);
+      setTimeout(tag84, 1400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V84_CLAUDE_FOLLOWUP__ = sys;
+        window.noMoonV84Debug = function () { return state.v84Debug(); };
+      }
+    } catch (e) { log84(e, 'install'); }
+    state.buildTag = V84_VERSION;
+  })();
+
 
   renderCodexStats();
 
 })();
+
 </script>
 </body>
 </html>

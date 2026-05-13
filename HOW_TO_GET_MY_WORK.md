@@ -13,15 +13,15 @@ Every time I finish a build pass, I'll put a complete drop-in website zip at:
 The current one is:
 
 ```
-/releases/no-moon-v82-website.zip   (~3.7 MB)
+/releases/no-moon-v84-website.zip   (~3.7 MB)
 ```
 
-Older releases stay in the same folder (v76 through v81 zips) in case you ever want to roll back.
+Older releases stay in the same folder (v76 through v82 zips) in case you ever want to roll back. (Pro's v83 is not in the zip set — v84 is v83 + my six bug fixes on top.)
 
 Direct raw URL (this is the one that downloaded easily for you):
 
 ```
-https://github.com/duplighost/Default/raw/claude/investigate-code-functionality-gP8aM/releases/no-moon-v82-website.zip
+https://github.com/duplighost/Default/raw/claude/investigate-code-functionality-gP8aM/releases/no-moon-v84-website.zip
 ```
 
 That zip has the **entire website folder structure** inside, ready to unzip onto your host. The internal layout matches the v75 zip you gave me, so it's a literal drop-in replacement — no figuring out which file goes where.
