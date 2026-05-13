@@ -13,31 +13,44 @@ Every time I finish a build pass, I'll put a complete drop-in website zip at:
 The current one is:
 
 ```
-/releases/no-moon-v76-website.zip   (~3.2 MB)
+/releases/no-moon-v77-website.zip   (~3.3 MB)
 ```
+
+Older releases stay in the same folder (`/releases/no-moon-v76-website.zip`, etc.) in case you ever want to roll back.
 
 That zip has the **entire website folder structure** inside, ready to unzip onto your host. The internal layout matches the v75 zip you gave me, so it's a literal drop-in replacement — no figuring out which file goes where.
 
 Inside the zip:
 
 ```
-v76_release/
-├── README_UPLOAD_THIS.txt   ← read this first, it explains everything in the build
-├── index.html               ← your site landing
+v77_release/
+├── README_UPLOAD_THIS.txt    ← read this first, it explains everything in the build
+├── index.html                ← your site landing
 ├── book.html
 ├── no-moon.html
 ├── _redirects
-├── no-moon-sw.js            ← root cleanup service worker
+├── no-moon-sw.js             ← root cleanup service worker
 ├── no-moon/
-│   ├── index.html           ← the actual game
-│   ├── game_inline.js       ← maintenance mirror (same as the script in index.html)
-│   └── no-moon-sw.js        ← game service worker
+│   ├── index.html            ← the actual game
+│   ├── game_inline.js        ← maintenance mirror (same as the script in index.html)
+│   └── no-moon-sw.js         ← game service worker
 └── assets/
+    ├── favicon.svg           ← site branding
+    ├── icon-192.png          ← PWA icon (small)
+    ├── icon-512.png          ← PWA icon (big)
+    ├── qualiacology-og.png   ← social-preview image
+    ├── site.webmanifest      ← PWA manifest
     └── no-moon/
-        ├── characters/      ← portraits, including new Moots + Vesper
-        ├── bosses/          ← boss cards
-        └── title/           ← title art
+        ├── characters/       ← portraits, including new Moots + Vesper
+        ├── bosses/           ← boss cards
+        └── title/            ← title art
 ```
+
+**Important:** The 5 root `/assets/` files (favicon, icons, manifest, OG image) are
+branding assets that the website needs to keep working correctly — favicon in the
+browser tab, app icon on phone home screens, social preview when you share the link.
+I missed them in the v76 zip; v77 has them. If you ever see them go missing from a
+future zip, ping me.
 
 ## How to grab the zip from this session
 

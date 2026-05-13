@@ -26488,6 +26488,24 @@ function drawHudBossMiniStats(p, layout) {
       } catch (e) { recordError(e); }
     }
 
+    // v77: shared shade/seal spot helper so the parasol shadow on floor 2
+    // sits at exactly the same point as the seal the player has to charge.
+    function sunShadeSealSpots77(room) {
+      const w = room.width || 1240, h = room.height || 900, wall = room.wall || 72;
+      const raw = [
+        { x: w * 0.28, y: h * 0.42, r: 78, label: 'I' },
+        { x: w * 0.72, y: h * 0.42, r: 78, label: 'II' },
+        { x: w * 0.50, y: h * 0.72, r: 84, label: 'III' }
+      ];
+      return raw.map(function (s) {
+        return {
+          x: clamp39(s.x, wall + 120, w - wall - 120),
+          y: clamp39(s.y, wall + 115, h - wall - 115),
+          r: s.r,
+          label: s.label
+        };
+      });
+    }
     function shadowPatchesForRoom39(room, floor) {
       const w = room.width || 1080, h = room.height || 780, wall = room.wall || 72;
       const base = [
@@ -26497,11 +26515,20 @@ function drawHudBossMiniStats(p, layout) {
         { x: w * 0.67, y: wall + 118, rx: 108, ry: 62, a: -0.12 }
       ];
       if (floor === 1) base.push({ x: w * 0.50, y: h * 0.52, rx: 94, ry: 58, a: 0.0 });
-      if (floor === 2) return [
-        { x: w * 0.22, y: h * 0.34, rx: 118, ry: 70, a: -0.10 },
-        { x: w * 0.78, y: h * 0.62, rx: 118, ry: 70, a: 0.12 },
-        { x: w * 0.50, y: h * 0.80, rx: 104, ry: 58, a: 0.0 }
-      ];
+      if (floor === 2) {
+        // v77: align shade circles with seal positions; mark them as parasol
+        // so the renderer can draw them with a visible shade-cast object.
+        return sunShadeSealSpots77(room).map(function (s) {
+          return {
+            x: s.x, y: s.y,
+            rx: s.r, ry: s.r,
+            a: 0,
+            parasol: true,
+            sealSpot: true,
+            label: s.label
+          };
+        });
+      }
       return base;
     }
     function inShadow39(room, x, y) {
@@ -26688,13 +26715,13 @@ function drawHudBossMiniStats(p, layout) {
       room.cleared = room.enemies.length === 0;
       if (room.exit) room.exit.active = false;
     }
+    // v77: seals sit on the exact same coords as the parasol shadows.
+    // Burn cooldown starts at 999 because v77 removes the in-circle damage —
+    // standing in your safe objective space should not feel like a hazard.
     function makeSunSeals39(room) {
-      const w = room.width || 1240, h = room.height || 900, wall = room.wall || 72;
-      return [
-        { x: w * 0.27, y: h * 0.40, r: 54, charge: 0, broken: false, burnCd: 0, label: 'I' },
-        { x: w * 0.73, y: h * 0.40, r: 54, charge: 0, broken: false, burnCd: 0, label: 'II' },
-        { x: w * 0.50, y: h * 0.71, r: 58, charge: 0, broken: false, burnCd: 0, label: 'III' }
-      ].map(s => ({ x: clamp39(s.x, wall + 90, w - wall - 90), y: clamp39(s.y, wall + 90, h - wall - 90), r: s.r, charge: 0, broken: false, burnCd: 0, label: s.label }));
+      return sunShadeSealSpots77(room).map(function (s) {
+        return { x: s.x, y: s.y, r: Math.max(54, s.r * 0.72), charge: 0, broken: false, burnCd: 999, label: s.label };
+      });
     }
     function configureSunThrone39(level) {
       if (!level || !Array.isArray(level.rooms) || !level.rooms.length) return;
@@ -26905,10 +26932,8 @@ function drawHudBossMiniStats(p, layout) {
         if (d < seal.r + (p.r || 17)) {
           seal.charge = Math.min(Number(sys.config.SUN_SEAL_SECONDS) || 2.35, Number(seal.charge || 0) + dt);
           sys.stats.sealTicks += 1;
-          if (seal.burnCd <= 0) {
-            seal.burnCd = Math.max(0.55, Number(sys.config.SUN_SEAL_BURN_COOLDOWN) || 1.06);
-            try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (e) { recordError(e); }
-          }
+          // v77: standing in the seal is a safe objective; pressure comes
+          // from the Sun's external attacks, not the seal itself.
           if (Math.random() < 0.18 && typeof spawnSpark === 'function') spawnSpark(seal.x, seal.y, '#fff6b8', 2, 70);
           if (seal.charge >= (Number(sys.config.SUN_SEAL_SECONDS) || 2.35)) {
             seal.broken = true;
@@ -26938,18 +26963,28 @@ function drawHudBossMiniStats(p, layout) {
       if (!Number.isFinite(fd)) fd = Math.max(0, Math.min(1, (Number(state.moonDebt) || 0) / 8));
       return clamp39(fd, 0, 1.4);
     }
+    // v77: heat-meter model. Standing in bright unshaded light fills a heat
+    // meter; full meter triggers a damage tick and tags the source as 'sunlight'
+    // so the player can attribute the hit. Standing in shade drains heat.
     function updateLightBurn39(dt) {
       if (!sys.config.SUN_LIGHT_HAZARD || state.mode !== 'play' || !levelIsMoonPath39()) return;
       const room = currentRoom39();
       const p = state.player;
-      if (!room || !p || room.cleared || (room.kind === 'entry' && !room._v39SunThrone)) return;
+      if (!room || !p || room.cleared || room._v77MajorBossDefeated || (room.kind === 'entry' && !room._v39SunThrone)) return;
       const bright = roomBrightAmount39(room);
-      if (bright < 0.55 || inShadow39(room, p.x, p.y)) { state._v39SunBurnCd = Math.min(Number(state._v39SunBurnCd || 0), 0.25); return; }
-      state._v39SunBurnCd = Math.max(0, Number(state._v39SunBurnCd || 0) - dt);
-      if (state._v39SunBurnCd <= 0) {
-        const fd = feltDebt39();
-        const cooldown = Math.max(Number(sys.config.LIGHT_BURN_MIN_COOLDOWN) || 0.62, (Number(sys.config.LIGHT_BURN_BASE_COOLDOWN) || 1.18) - fd * (Number(sys.config.LIGHT_BURN_DEBT_COOLDOWN_REDUCTION) || 0.42));
-        state._v39SunBurnCd = cooldown;
+      const shaded = inShadow39(room, p.x, p.y);
+      if (bright < 0.55 || shaded) {
+        // Cool / drain.
+        state._v77SunHeat = Math.max(0, Number(state._v77SunHeat || 0) - dt * (shaded ? 1.7 : 1.0));
+        state._v39SunBurnCd = Math.min(Number(state._v39SunBurnCd || 0), 0.25);
+        return;
+      }
+      const fd = feltDebt39();
+      const gain = (0.42 + fd * 0.10) * dt;
+      state._v77SunHeat = clamp39(Number(state._v77SunHeat || 0) + gain, 0, 1.18);
+      if (Number(state._v77SunHeat || 0) >= 1) {
+        state._v77SunHeat = 0.38;
+        try { if (typeof state.v77TagSunDamage === 'function') state.v77TagSunDamage('sunlight', p.x, p.y, 1); } catch (e) {}
         try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (e) { recordError(e); }
         try {
           if (typeof spawnSpark === 'function') {
@@ -26957,7 +26992,7 @@ function drawHudBossMiniStats(p, layout) {
             spawnSpark(p.x, p.y, '#ffffff', 2, 70);
           }
         } catch (e) {}
-        state._v39SunBleach = Math.max(Number(state._v39SunBleach || 0), 0.42 + fd * 0.20);
+        state._v39SunBleach = Math.max(Number(state._v39SunBleach || 0), 0.30 + fd * 0.12);
         sys.stats.lightBurns += 1;
       }
     }
@@ -27000,7 +27035,9 @@ function drawHudBossMiniStats(p, layout) {
       };
       room._v39QuoteStrikes.push(strike);
       if (room._v39QuoteStrikes.length > 6) room._v39QuoteStrikes.shift();
-      try { if (typeof pushMessage === 'function') pushMessage(text, '#ffd05c', 16, 1.55, 0.18); } catch (err) {}
+      // v77: do not push the readable quote during live combat. The visual
+      // glyph row on the damage line teaches the player what's about to happen
+      // without making them read a sentence while dodging.
       sys.stats.quoteStrikes += 1;
     }
     function updateQuoteStrikes39(dt) {
@@ -27012,6 +27049,7 @@ function drawHudBossMiniStats(p, layout) {
         if (p && q.t >= q.delay && q.t <= q.delay + q.active && !q.hit) {
           if (distPointSegment39(p.x, p.y, q.x1, q.y1, q.x2, q.y2) < (q.width || 32) + (p.r || 17)) {
             q.hit = true;
+            try { if (typeof state.v77TagSunDamage === 'function') state.v77TagSunDamage('ray', (q.x1 + q.x2) * 0.5, (q.y1 + q.y2) * 0.5, 1); } catch (e) {}
             try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (e) { recordError(e); }
           }
         }
@@ -27130,6 +27168,7 @@ function drawHudBossMiniStats(p, layout) {
       e.fireCd = Math.max(0, (e.fireCd || 0) - dt);
       e.ringCd = Math.max(0, (e.ringCd || 0) - dt);
       if (Math.hypot(p.x - e.x, p.y - e.y) < (p.r || 17) + (e.r || 58) + 2) {
+        try { if (typeof state.v77TagSunDamage === 'function') state.v77TagSunDamage('contact', e.x, e.y, 1); } catch (err) {}
         try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (err) { recordError(err); }
       }
     }
@@ -27140,7 +27179,17 @@ function drawHudBossMiniStats(p, layout) {
       const room = currentRoom39();
       if (room) { room._v39SunDefeated = true; room.cleared = true; if (room.exit) room.exit.active = false; }
       if (state.level) state.level.cleared = true;
-      try { if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles(); } catch (e) {}
+      // v77: aggressively safe the room. After this point, no leftover hazard
+      // can take the win. The v77 tail helper also clears hazards/traps/quote
+      // strikes and gives the player generous invuln.
+      try {
+        if (typeof state.v77MakeMajorBossRoomSafe === 'function') {
+          state.v77MakeMajorBossRoomSafe(room, 'sunCore', { color: '#fff6b8', invuln: 999 });
+        } else {
+          if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles();
+          if (state.player) state.player.hitInvuln = Math.max(state.player.hitInvuln || 0, 999);
+        }
+      } catch (e) { recordError(e); }
       try { if (typeof startSlowMo === 'function') startSlowMo(2.0, 0.16); } catch (e) {}
       try { if (typeof spawnRing === 'function') { spawnRing(enemy.x, enemy.y, '#ffffff', 420); spawnRing(enemy.x, enemy.y, '#fff6b8', 620); } } catch (e) {}
       try { if (typeof spawnSpark === 'function') for (let i = 0; i < 90; i++) spawnSpark(enemy.x, enemy.y, i % 3 ? '#fff6b8' : '#ffffff', 3, 280 + Math.random() * 260); } catch (e) {}
@@ -27150,10 +27199,18 @@ function drawHudBossMiniStats(p, layout) {
       state.v69SunFinale = { x: enemy.x, y: enemy.y, r: enemy.r || 96, t: 0, life: 3.65, seed: Math.random() * 9999 };
       stopSunDrone39();
       sys.stats.sunDefeated += 1;
-      setTimeout(function() {
-        try { completeSunVictory39(); } catch (e) { recordError(e); }
-      }, 3650);
+      // v77: install crater + Return Sigil; the v77 update tick watches for
+      // the player touching the sigil and calls v39FinishSunVictory then.
+      // No setTimeout auto-win.
+      try {
+        const priorSunClears = storageInt39(SUN_PATH_KEY, 0);
+        if (typeof state.v77InstallSunVictoryObjects === 'function' && room) {
+          state.v77InstallSunVictoryObjects(room, enemy, priorSunClears);
+        }
+      } catch (e) { recordError(e); }
     }
+    // v77: exposed so the v77 tail tick can finish the win on Return Sigil touch.
+    state.v39FinishSunVictory = function () { try { completeSunVictory39(); } catch (e) { recordError(e); } };
     function completeSunVictory39() {
       if (state._v39SunVictoryHandoff) return;
       state._v39SunVictoryHandoff = true;
@@ -27596,6 +27653,37 @@ function drawHudBossMiniStats(p, layout) {
       // Shade patches are drawn again on top with low alpha so the player can identify cover during bright phases.
       if (sys.config.SHADOW_PATCHES && Array.isArray(room._v39ShadowPatches)) {
         for (const s of room._v39ShadowPatches) {
+          // v77: parasol-style readable safe zone for the Sun throne floor.
+          if (s.parasol) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(2,6,18,0.36)';
+            ctx.beginPath(); ctx.arc(s.x, s.y, s.rx, 0, TAU39); ctx.fill();
+            ctx.strokeStyle = 'rgba(189,231,255,0.30)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(s.x, s.y, s.rx, 0, TAU39); ctx.stroke();
+            // Parasol pole + ribs hint the object that casts the shade.
+            ctx.strokeStyle = 'rgba(20,25,38,0.62)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y - 8);
+            ctx.lineTo(s.x, s.y - 60);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(12,18,30,0.52)';
+            ctx.lineWidth = 1.6;
+            for (let i = 0; i < 8; i++) {
+              const a = -Math.PI * 0.88 + i * (Math.PI * 1.76 / 7);
+              ctx.beginPath();
+              ctx.moveTo(s.x, s.y - 60);
+              ctx.lineTo(s.x + Math.cos(a) * 44, s.y - 60 + Math.sin(a) * 20);
+              ctx.stroke();
+            }
+            ctx.fillStyle = 'rgba(5,8,18,0.72)';
+            ctx.beginPath();
+            ctx.ellipse(s.x, s.y - 60, 50, 18, 0, Math.PI, 0);
+            ctx.fill();
+            ctx.restore();
+            continue;
+          }
           ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.a || 0);
           ctx.fillStyle = 'rgba(2,4,10,0.28)';
           ctx.beginPath(); ctx.ellipse(0, 0, s.rx, s.ry, 0, 0, TAU39); ctx.fill();
@@ -27604,7 +27692,7 @@ function drawHudBossMiniStats(p, layout) {
           ctx.restore();
         }
       }
-      // Quote strikes.
+      // Quote strikes: visual glyphs only, no readable text during live combat.
       if (Array.isArray(room._v39QuoteStrikes)) {
         for (const q of room._v39QuoteStrikes) {
           const active = q.t >= q.delay && q.t <= q.delay + q.active;
@@ -27617,29 +27705,85 @@ function drawHudBossMiniStats(p, layout) {
           ctx.lineDashOffset = -(state.time || 0) * 40;
           ctx.beginPath(); ctx.moveTo(q.x1, q.y1); ctx.lineTo(q.x2, q.y2); ctx.stroke();
           ctx.setLineDash([]);
-          ctx.font = '900 13px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillStyle = active ? 'rgba(255,255,255,0.78)' : 'rgba(255,220,140,0.52)';
-          ctx.fillText(q.text, (q.x1 + q.x2) * 0.5, (q.y1 + q.y2) * 0.5);
+          // v77: ring-and-slash marks at intervals along the line instead of
+          // a readable sentence the player would have to parse mid-dodge.
+          const mx = (q.x1 + q.x2) * 0.5;
+          const my = (q.y1 + q.y2) * 0.5;
+          const dx = q.x2 - q.x1;
+          const dy = q.y2 - q.y1;
+          const len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len, uy = dy / len;
+          ctx.strokeStyle = active ? 'rgba(255,255,255,0.66)' : 'rgba(255,208,92,0.38)';
+          ctx.lineWidth = active ? 2.2 : 1.4;
+          for (let i = -3; i <= 3; i++) {
+            const gx = mx + ux * i * 38;
+            const gy = my + uy * i * 38;
+            ctx.beginPath(); ctx.arc(gx, gy, active ? 6 : 4, 0, TAU39); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(gx - uy * 9, gy + ux * 9);
+            ctx.lineTo(gx + uy * 9, gy - ux * 9);
+            ctx.stroke();
+          }
           ctx.restore();
         }
       }
-      // Sun seals.
+      // Sun seals: arc + cracks teach progress without text.
       if (Array.isArray(room._v39SunSeals)) {
+        const sealBoss = state.enemies && state.enemies.find(e => e && e.typeId === 'sunCore' && !e.remove);
         for (const s of room._v39SunSeals) {
           const pct = s.broken ? 1 : clamp39(Number(s.charge || 0) / Math.max(0.1, Number(sys.config.SUN_SEAL_SECONDS) || 2.35), 0, 1);
+          const t = state.time || 0;
           ctx.save(); ctx.globalCompositeOperation = 'screen';
-          const pulse = 0.72 + 0.28 * Math.sin((state.time || 0) * 4 + (s.label || 'I').length);
-          ctx.strokeStyle = s.broken ? 'rgba(220,235,255,0.72)' : 'rgba(255,225,120,' + (0.38 + 0.20 * pulse) + ')';
-          ctx.lineWidth = s.broken ? 3 : 2;
+          // Objective ring.
+          ctx.strokeStyle = s.broken ? 'rgba(189,231,255,0.72)' : 'rgba(255,225,120,0.52)';
+          ctx.lineWidth = s.broken ? 3.2 : 2.2;
+          ctx.setLineDash(s.broken ? [] : [9, 7]);
+          ctx.lineDashOffset = -t * 18;
           ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU39); ctx.stroke();
-          ctx.strokeStyle = 'rgba(255,255,255,0.88)'; ctx.lineWidth = 5;
-          ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 8, -Math.PI * 0.5, -Math.PI * 0.5 + TAU39 * pct); ctx.stroke();
-          ctx.fillStyle = s.broken ? 'rgba(220,235,255,0.62)' : 'rgba(255,245,198,0.66)';
-          ctx.font = '900 13px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(s.broken ? 'BROKEN' : 'STAND', s.x, s.y);
+          ctx.setLineDash([]);
+          // Charge arc.
+          if (!s.broken) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.88)';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r + 8, -Math.PI * 0.5, -Math.PI * 0.5 + TAU39 * pct);
+            ctx.stroke();
+          }
+          // Completion cracks instead of 'BROKEN'.
+          if (s.broken) {
+            ctx.strokeStyle = 'rgba(223,246,255,0.58)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 7; i++) {
+              const a = i * TAU39 / 7 + 0.2;
+              ctx.beginPath();
+              ctx.moveTo(s.x + Math.cos(a) * s.r * 0.52, s.y + Math.sin(a) * s.r * 0.52);
+              ctx.lineTo(s.x + Math.cos(a + 0.12) * s.r * 1.02, s.y + Math.sin(a + 0.12) * s.r * 1.02);
+              ctx.stroke();
+            }
+          }
+          // Three sun-pin sockets around the ring, no words.
+          for (let i = 0; i < 3; i++) {
+            const a = -Math.PI * 0.5 + i * TAU39 / 3;
+            ctx.fillStyle = s.broken ? 'rgba(189,231,255,0.62)' : 'rgba(255,225,120,0.62)';
+            ctx.beginPath();
+            ctx.arc(s.x + Math.cos(a) * (s.r + 18), s.y + Math.sin(a) * (s.r + 18), 3.2, 0, TAU39);
+            ctx.fill();
+          }
+          // Tether to the Sun while unbroken.
+          if (!s.broken && sealBoss && !sealBoss.remove) {
+            ctx.strokeStyle = 'rgba(255,225,120,0.16)';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y);
+            ctx.lineTo(sealBoss.x, sealBoss.y);
+            ctx.stroke();
+          }
           ctx.restore();
         }
       }
+      // v77: crater + Return Sigil drawn under the world transform.
+      try { if (typeof state.v77DrawSunCrater === 'function') state.v77DrawSunCrater(room); } catch (e) {}
+      try { if (typeof state.v77DrawSunReturnSigil === 'function') state.v77DrawSunReturnSigil(room); } catch (e) {}
       ctx.restore();
     }
     function drawScreenOverlays39() {
@@ -27656,17 +27800,17 @@ function drawHudBossMiniStats(p, layout) {
         ctx.fillRect(0, 0, W, H);
         ctx.restore();
       }
-      const bleach = clamp39(Number(state._v39SunBleach || 0), 0, 1);
+      // v77: cap the bleach while the Sun is still alive so the player can
+      // see hitboxes. Lift the cap once the boss is dead so the finale can bloom.
+      const bleachRaw = clamp39(Number(state._v39SunBleach || 0), 0, 1);
+      const liveBoss = state.enemies && state.enemies.some(e => e && e.typeId === 'sunCore' && !e.remove);
+      const bleach = liveBoss ? Math.min(bleachRaw, 0.56) : bleachRaw;
       if (bleach > 0.01) {
-        ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = 'rgba(255,255,235,' + (0.42 * bleach) + ')'; ctx.fillRect(0, 0, W, H); ctx.restore();
+        ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = 'rgba(255,255,235,' + (0.34 * bleach) + ')'; ctx.fillRect(0, 0, W, H); ctx.restore();
       }
-      if (bright > 0.65 && p && !inShade && !room._v39SunThrone) {
-        ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.font = '900 ' + Math.max(14, Math.min(22, W * 0.04)) + 'px Inter, system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.86)'; ctx.strokeStyle = 'rgba(48,30,12,0.72)'; ctx.lineWidth = 4;
-        ctx.strokeText('FIND SHADE', W * 0.5, Math.max(60, H * 0.18)); ctx.fillText('FIND SHADE', W * 0.5, Math.max(60, H * 0.18));
-        ctx.restore();
-      }
+      // v77: heat meter instead of 'FIND SHADE' text. Sun-throne floor is excluded
+      // because the parasol shadows + seal arcs already teach shade.
+      try { if (typeof state.v77DrawSunHeatMeter === 'function') state.v77DrawSunHeatMeter(); } catch (e) {}
       if (Number(state._v39WitnessPressure || 0) > 0.02) {
         ctx.save(); ctx.strokeStyle = 'rgba(255,246,214,' + (0.22 * state._v39WitnessPressure) + ')'; ctx.lineWidth = 8;
         ctx.strokeRect(8, 8, W - 16, H - 16); ctx.restore();
@@ -27742,12 +27886,24 @@ function drawHudBossMiniStats(p, layout) {
         const room = currentRoom39();
         const phase = Number(boss._v39SunPhase || 1);
         const seals = room ? sunSealsBroken39(room) : 0;
-        const label = phase === 1 ? 'THE SUN — WITNESS THE SEALS ' + seals + '/3' : phase === 2 ? 'THE SUN — THE LIGHT MOVES' : 'THE SUN — AFRAID';
+        // v77: drop instruction phrases. The label stays 'THE SUN'; phase-1
+        // progress is shown as three pips next to it instead of a sentence.
+        const label = 'THE SUN';
         ctx.save();
         rr39(ctx, x - 8, y - 2, w + 16, 30, 14); ctx.fillStyle = 'rgba(32,19,8,0.78)'; ctx.fill();
         ctx.strokeStyle = 'rgba(255,246,184,0.28)'; ctx.lineWidth = 1.3; rr39(ctx, x - 7.5, y - 1.5, w + 15, 29, 14); ctx.stroke();
         ctx.font = compact ? '700 10px Inter, system-ui, sans-serif' : '700 12px Inter, system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.fillStyle = '#fff6b8'; ctx.fillText(label, W * 0.5, y + 9);
+        if (phase === 1) {
+          const pipY = y + 9;
+          const startX = W * 0.5 + (compact ? 40 : 52);
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(startX + i * 15, pipY - 1, 4.2, 0, Math.PI * 2);
+            ctx.fillStyle = i < seals ? '#dff6ff' : 'rgba(255,246,184,0.28)';
+            ctx.fill();
+          }
+        }
         rr39(ctx, x, y + 13, w, h, 7); ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fill();
         const ratio = phase === 1 ? seals / 3 : clamp39(boss.hp / Math.max(1, boss.maxHp), 0, 1);
         rr39(ctx, x + 1, y + 14, (w - 2) * ratio, h - 2, 6); ctx.fillStyle = phase === 3 ? '#ffffff' : '#fff6b8'; ctx.fill();
@@ -43007,6 +43163,439 @@ function drawHudBossMiniStats(p, layout) {
       }
     } catch (e) { log76(e, 'install'); }
     state.buildTag = V76_VERSION;
+  })();
+
+
+  // ===================================================================
+  // === v77 — Sunfall Safety + Sun Readability ========================
+  // ===================================================================
+  // 1. After a major boss is defeated (warden, archon, sunCore, v59NightFerry),
+  //    the room becomes safe immediately. No leftover damage can take the win.
+  // 2. Sun-specific helpers used by direct edits inside v39: source-tagging
+  //    helper, crater + return sigil draw / tick, heat-meter HUD piece.
+  // 3. Debug helpers: state.v77Debug, state.v77LastDamageSource.
+  // ===================================================================
+  (function installV77SunfallSafetyReadability() {
+    const V77_VERSION = 'qual.sunfall-safety-readability.2026-05-13.v77';
+    const CACHE77 = 'no-moon-sunfall-safety-readability-v77';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v77SunfallSafety && state.v77SunfallSafety.installed) return;
+
+    const sys = state.v77SunfallSafety = {
+      installed: true,
+      version: V77_VERSION,
+      cacheExpected: CACHE77,
+      stats: {
+        majorBossRoomsSafed: 0,
+        postBossDamageBlocked: 0,
+        sunDamageTagged: 0,
+        sunReturnTouches: 0,
+        sunCraterTouches: 0,
+        lastError: null
+      }
+    };
+
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    const ROOM = () => { try { return typeof currentRoom === 'function' ? currentRoom() : null; } catch (_) { return null; } };
+
+    function log77(e, where) {
+      const msg = (where || 'v77') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v77]', msg, e); } catch (_) {}
+    }
+
+    function tag77() { try { state.buildTag = V77_VERSION; } catch (_) {} }
+
+    // -----------------------------------------------------------------
+    // Major-boss room safety
+    // -----------------------------------------------------------------
+    const MAJOR_BOSS_IDS = ['warden', 'archon', 'sunCore', 'v59NightFerry'];
+    function isMajorBoss77(enemyOrType) {
+      const id = String(typeof enemyOrType === 'string' ? enemyOrType : (enemyOrType && (enemyOrType.typeId || enemyOrType.behavior || '')));
+      return MAJOR_BOSS_IDS.indexOf(id) !== -1;
+    }
+
+    function makeMajorBossRoomSafe77(room, bossId, opts) {
+      try {
+        if (!room) return false;
+        opts = opts || {};
+        room._v77MajorBossDefeated = true;
+        room._v77MajorBossId = bossId || room._v77MajorBossId || 'majorBoss';
+        room._v77MajorBossSafeAt = N(state.time);
+        room.cleared = true;
+        if (state.level) state.level.cleared = true;
+
+        try { if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles(); } catch (e) { log77(e, 'clearHostileProjectiles'); }
+
+        if (Array.isArray(room.hazards)) room.hazards.length = 0;
+        if (Array.isArray(room.traps)) room.traps.length = 0;
+        if (Array.isArray(room._v39QuoteStrikes)) room._v39QuoteStrikes.length = 0;
+
+        if (bossId === 'sunCore') {
+          room._v39SunDefeated = true;
+          if (Array.isArray(room._v39SunSeals)) {
+            for (const seal of room._v39SunSeals) {
+              if (!seal) continue;
+              seal.broken = true;
+              seal.charge = 999;
+              seal.burnCd = 999;
+            }
+          }
+        }
+
+        if (state.level && state.level.currentRoom === room) {
+          state.level.hazards = room.hazards || [];
+          state.level.traps = room.traps || [];
+          state.level.enemies = room.enemies || [];
+        }
+        if (state.level && state.level.hazards) state.hazards = state.level.hazards;
+        if (state.level && state.level.traps) state.traps = state.level.traps;
+
+        try {
+          if (Array.isArray(room.enemies)) {
+            for (const e of room.enemies) {
+              if (e && !isMajorBoss77(e) && !e.remove) { e.remove = true; e.dead = true; }
+            }
+          }
+        } catch (e) { log77(e, 'collapse adds'); }
+
+        if (state.player) {
+          state.player.hitInvuln = Math.max(N(state.player.hitInvuln), N(opts.invuln, 8.0));
+        }
+
+        state._v77MajorBossSafeRoomId = room.id;
+        state._v77MajorBossSafeLevelIndex = state.level ? state.level.index : state.levelIndex;
+        state._v77MajorBossSafeBossId = bossId || 'majorBoss';
+        sys.stats.majorBossRoomsSafed += 1;
+        return true;
+      } catch (e) { log77(e, 'makeMajorBossRoomSafe'); return false; }
+    }
+    state.v77MakeMajorBossRoomSafe = makeMajorBossRoomSafe77;
+    state.v77IsMajorBoss = isMajorBoss77;
+
+    function majorBossRoomIsSafe77() {
+      const room = ROOM();
+      if (!room || !room._v77MajorBossDefeated) return false;
+      if (state.mode !== 'play') return false;
+      return true;
+    }
+
+    if (typeof damagePlayer === 'function' && !damagePlayer.__v77MajorBossSafe) {
+      const baseDamage77 = damagePlayer;
+      damagePlayer = function damagePlayerV77(amount) {
+        if (majorBossRoomIsSafe77()) {
+          sys.stats.postBossDamageBlocked += 1;
+          state._v77LastDamageSource = Object.assign({}, state._v77LastDamageSource || {}, {
+            blocked: true,
+            blockedAt: N(state.time),
+            roomId: ROOM() && ROOM().id,
+            bossId: state._v77MajorBossSafeBossId || null
+          });
+          return false;
+        }
+        return baseDamage77.apply(this, arguments);
+      };
+      damagePlayer.__v77MajorBossSafe = true;
+    }
+
+    if (typeof killEnemy === 'function' && !killEnemy.__v77MajorBossSafe) {
+      const baseKill77 = killEnemy;
+      killEnemy = function killEnemyV77(enemy) {
+        const shouldSafe = !!(enemy && !enemy.remove && isMajorBoss77(enemy));
+        const id = shouldSafe ? enemy.typeId : null;
+        const color = enemy && enemy.color;
+        const result = baseKill77.apply(this, arguments);
+        if (shouldSafe) {
+          try {
+            const invuln = id === 'sunCore' ? 999 : 8;
+            makeMajorBossRoomSafe77(ROOM(), id, { color: color, invuln: invuln });
+          } catch (e) { log77(e, 'killEnemy major boss safe'); }
+        }
+        return result;
+      };
+      killEnemy.__v77MajorBossSafe = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Sun damage source tagging (called from v39 sites)
+    // -----------------------------------------------------------------
+    state.v77TagSunDamage = function (source, x, y, amount) {
+      try {
+        state._v77LastDamageSource = {
+          source: 'sun:' + (source || 'unknown'),
+          x: N(x),
+          y: N(y),
+          amount: N(amount, 1),
+          t: N(state.time),
+          roomId: ROOM() && ROOM().id
+        };
+        sys.stats.sunDamageTagged += 1;
+        try {
+          if (typeof spawnRing === 'function' && x != null && y != null) {
+            const color = source === 'sunlight' ? '#fff6b8'
+              : source === 'ray' ? '#ffffff'
+              : source === 'contact' ? '#ffbd5a'
+              : '#fff6b8';
+            spawnRing(x, y, color, source === 'ray' ? 64 : 44);
+          }
+        } catch (_) {}
+      } catch (e) { log77(e, 'tagSunDamage'); }
+    };
+
+    // -----------------------------------------------------------------
+    // Sun crater + Return Sigil (room objects installed by v39 on Sun
+    // death; this code only handles tick + draw + win-trigger).
+    // -----------------------------------------------------------------
+    state.v77InstallSunVictoryObjects = function installSunVictoryObjects(room, enemy, priorSunClears) {
+      try {
+        if (!room) return false;
+        const w = N(room.width, 1240);
+        const h = N(room.height, 900);
+        const open = N(priorSunClears) > 0;
+        // Stable landmark, not where the sun happened to die.
+        room._v77SunCrater = {
+          x: w * 0.5,
+          y: h * 0.42,
+          r: Math.max(72, Math.min(112, Math.min(w, h) * 0.095)),
+          open: open,
+          sealed: !open,
+          sealT: 0,
+          active: open,
+          firstClear: !open,
+          fromX: enemy ? N(enemy.x, w * 0.5) : w * 0.5,
+          fromY: enemy ? N(enemy.y, h * 0.42) : h * 0.42,
+          bornAt: N(state.time)
+        };
+        room._v77SunReturnSigil = {
+          x: w * 0.5,
+          y: h * 0.66,
+          r: 58,
+          active: true,
+          bornAt: N(state.time),
+          touched: false
+        };
+        // Move the v69 finale anchor to the stable crater point so the visual
+        // and the physical crater agree.
+        try {
+          if (state.v69SunFinale) {
+            state.v69SunFinale.x = room._v77SunCrater.x;
+            state.v69SunFinale.y = room._v77SunCrater.y;
+          }
+        } catch (_) {}
+        state._v77SunAwaitingReturnTouch = true;
+        return true;
+      } catch (e) { log77(e, 'installSunVictoryObjects'); return false; }
+    };
+
+    function updateSunVictoryObjects77(dt) {
+      try {
+        if (state.mode !== 'play') return;
+        const room = ROOM();
+        const p = state.player;
+        if (!room || !p) return;
+        const sigil = room._v77SunReturnSigil;
+        const crater = room._v77SunCrater;
+        if (!sigil && !crater) return;
+        if (crater) crater.sealT = Math.min(1, N(crater.sealT) + dt * 0.42);
+        if (sigil && sigil.active && !sigil.touched) {
+          const d = Math.hypot(p.x - sigil.x, p.y - sigil.y);
+          if (d < sigil.r + N(p.r, 17)) {
+            sigil.touched = true;
+            state._v77SunAwaitingReturnTouch = false;
+            sys.stats.sunReturnTouches += 1;
+            try {
+              if (typeof state.v39FinishSunVictory === 'function') state.v39FinishSunVictory();
+            } catch (e) { log77(e, 'return touch finish'); }
+          }
+        }
+        if (crater && crater.open && crater.active) {
+          const dc = Math.hypot(p.x - crater.x, p.y - crater.y);
+          if (dc < crater.r * 0.72 + N(p.r, 17)) {
+            // Future: state.v77BeginStarlessWell. Today: visual only, no
+            // softlock; mark as touched once so we don't spam.
+            sys.stats.sunCraterTouches += 1;
+            crater.active = false;
+          }
+        }
+      } catch (e) { log77(e, 'updateSunVictoryObjects'); }
+    }
+
+    function drawSunReturnSigil77(room) {
+      try {
+        const s = room && room._v77SunReturnSigil;
+        if (!s || !s.active) return;
+        const t = N(state.time);
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const pulse = 0.72 + 0.28 * Math.sin(t * 3);
+        ctx.strokeStyle = 'rgba(223,246,255,' + (0.46 + 0.18 * pulse).toFixed(3) + ')';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = 'rgba(246,220,255,0.34)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y - s.r * 0.62);
+        ctx.lineTo(s.x, s.y + s.r * 0.62);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r * 0.32, -Math.PI * 0.5, Math.PI * 1.5);
+        ctx.stroke();
+        ctx.restore();
+      } catch (e) { log77(e, 'drawReturnSigil'); }
+    }
+
+    function drawSunCrater77(room) {
+      try {
+        const c = room && room._v77SunCrater;
+        if (!c) return;
+        const t = N(state.time);
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(0,0,0,0.86)';
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, c.r * 1.22, c.r * 0.52, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.strokeStyle = c.open ? 'rgba(189,231,255,0.42)' : 'rgba(255,202,120,0.28)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, c.r * 1.26, c.r * 0.56, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        if (c.sealed) {
+          ctx.globalCompositeOperation = 'source-over';
+          const lid = Math.min(1, N(c.sealT));
+          ctx.fillStyle = 'rgba(91,61,38,' + (0.40 + 0.42 * lid).toFixed(3) + ')';
+          ctx.beginPath();
+          ctx.ellipse(c.x, c.y, c.r * (0.70 + 0.32 * lid), c.r * (0.28 + 0.12 * lid), 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,209,132,0.22)';
+          ctx.lineWidth = 2;
+          for (let i = 0; i < 9; i++) {
+            const a = (i / 9) * Math.PI * 2 + t * 0.05;
+            ctx.beginPath();
+            ctx.moveTo(c.x + Math.cos(a) * c.r * 0.18, c.y + Math.sin(a) * c.r * 0.08);
+            ctx.lineTo(c.x + Math.cos(a) * c.r * 0.88, c.y + Math.sin(a) * c.r * 0.34);
+            ctx.stroke();
+          }
+        } else if (c.open) {
+          ctx.globalCompositeOperation = 'screen';
+          for (let i = 0; i < 18; i++) {
+            const a = i * Math.PI * 2 / 18 + t * 0.12;
+            const rr = c.r * (0.2 + ((i * 37) % 11) / 11 * 0.85);
+            ctx.fillStyle = i % 3 ? 'rgba(189,231,255,0.22)' : 'rgba(246,220,255,0.25)';
+            ctx.beginPath();
+            ctx.arc(c.x + Math.cos(a) * rr, c.y + Math.sin(a) * rr * 0.38, 1.4 + (i % 2), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      } catch (e) { log77(e, 'drawCrater'); }
+    }
+    state.v77DrawSunCrater = drawSunCrater77;
+    state.v77DrawSunReturnSigil = drawSunReturnSigil77;
+
+    // Tick crater/sigil after the normal update loop.
+    if (typeof updateGame === 'function' && !updateGame.__v77SunVictory) {
+      const baseUpdate77 = updateGame;
+      updateGame = function updateGameV77(dt) {
+        const out = baseUpdate77.apply(this, arguments);
+        try {
+          const d = Math.min(0.08, Math.max(0, N(dt)));
+          if (d > 0) updateSunVictoryObjects77(d);
+        } catch (e) { log77(e, 'updateGame'); }
+        return out;
+      };
+      updateGame.__v77SunVictory = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Sun heat meter (HUD piece, called from v39 drawScreenOverlays)
+    // -----------------------------------------------------------------
+    state.v77DrawSunHeatMeter = function drawSunHeatMeter() {
+      try {
+        const heat = Math.max(0, Math.min(1, N(state._v77SunHeat)));
+        if (heat <= 0.02) return;
+        const x = W * 0.5;
+        const y = Math.max(48, H * 0.11);
+        const r = 16;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.strokeStyle = 'rgba(255,226,138,0.28)';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = heat > 0.82 ? 'rgba(255,255,255,0.88)' : 'rgba(255,215,112,0.74)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 5, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * heat);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,245,198,0.58)';
+        ctx.lineWidth = 1.6;
+        for (let i = 0; i < 8; i++) {
+          const a = i * Math.PI * 2 / 8;
+          ctx.beginPath();
+          ctx.moveTo(x + Math.cos(a) * 6, y + Math.sin(a) * 6);
+          ctx.lineTo(x + Math.cos(a) * 11, y + Math.sin(a) * 11);
+          ctx.stroke();
+        }
+        ctx.restore();
+      } catch (e) { log77(e, 'heatMeter'); }
+    };
+
+    // -----------------------------------------------------------------
+    // Debug
+    // -----------------------------------------------------------------
+    state.v77Debug = function v77Debug() {
+      const room = ROOM();
+      const p = state.player;
+      return {
+        version: V77_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE77,
+        mode: state.mode,
+        overlayMode: state.overlayMode,
+        room: room && {
+          id: room.id,
+          kind: room.kind,
+          cleared: !!room.cleared,
+          sunThrone: !!room._v39SunThrone,
+          sunDefeated: !!room._v39SunDefeated,
+          majorBossDefeated: !!room._v77MajorBossDefeated,
+          majorBossId: room._v77MajorBossId || null,
+          sunCrater: room._v77SunCrater && {
+            x: room._v77SunCrater.x, y: room._v77SunCrater.y, r: room._v77SunCrater.r,
+            open: !!room._v77SunCrater.open, sealed: !!room._v77SunCrater.sealed,
+            active: !!room._v77SunCrater.active, sealT: room._v77SunCrater.sealT
+          },
+          sunReturnSigil: room._v77SunReturnSigil && {
+            x: room._v77SunReturnSigil.x, y: room._v77SunReturnSigil.y, r: room._v77SunReturnSigil.r,
+            active: !!room._v77SunReturnSigil.active, touched: !!room._v77SunReturnSigil.touched
+          }
+        },
+        player: p && {
+          hp: p.hp, maxHp: p.maxHp, x: p.x, y: p.y,
+          hitInvuln: p.hitInvuln,
+          sunHeat: N(state._v77SunHeat)
+        },
+        lastDamageSource: state._v77LastDamageSource || null,
+        v76: typeof state.v76Debug === 'function' ? state.v76Debug() : null,
+        v39: typeof state.v39Debug === 'function' ? state.v39Debug() : null,
+        stats: Object.assign({}, sys.stats)
+      };
+    };
+
+    try {
+      tag77();
+      setTimeout(tag77, 0);
+      setTimeout(tag77, 350);
+      setTimeout(tag77, 1400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V77_SUNFALL_SAFETY__ = sys;
+        window.noMoonV77Debug = function () { return state.v77Debug(); };
+        window.noMoonDamageDebug = function () { return state._v77LastDamageSource || null; };
+        window.noMoonV77MakeMajorBossRoomSafe = function (room, bossId, opts) { return makeMajorBossRoomSafe77(room || ROOM(), bossId, opts || {}); };
+      }
+    } catch (e) { log77(e, 'install'); }
+    state.buildTag = V77_VERSION;
   })();
 
 
