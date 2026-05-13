@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-route-stars-passengers-v76';
+const CACHE_NAME = 'no-moon-moots-lock-reroll-polish-v78';
 const ASSETS = [
   './',
   './index.html',
