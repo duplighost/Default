@@ -13,17 +13,17 @@ Every time I finish a build pass, I'll put a complete drop-in website zip at:
 The current one is:
 
 ```
-/releases/no-moon-v78-website.zip   (~3.3 MB)
+/releases/no-moon-v79-website.zip   (~3.4 MB)
 ```
 
-Older releases stay in the same folder (`/releases/no-moon-v76-website.zip`, `no-moon-v77-website.zip`, etc.) in case you ever want to roll back.
+Older releases stay in the same folder (`/releases/no-moon-v76-website.zip`, `no-moon-v77-website.zip`, `no-moon-v78-website.zip`, etc.) in case you ever want to roll back.
 
 That zip has the **entire website folder structure** inside, ready to unzip onto your host. The internal layout matches the v75 zip you gave me, so it's a literal drop-in replacement — no figuring out which file goes where.
 
 Inside the zip:
 
 ```
-v78_release/
+v79_release/
 ├── README_UPLOAD_THIS.txt    ← read this first, it explains everything in the build
 ├── index.html                ← your site landing
 ├── book.html

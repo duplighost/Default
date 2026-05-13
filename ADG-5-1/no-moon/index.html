@@ -44975,6 +44975,1044 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v79 — The Drowned Sky + The Drowned Sun + Cold Lantern ========
+  // ===================================================================
+  // Adds a second route accessible through the open Sun crater on second
+  // and later Sun clears. Sun fell into the well; the player descends
+  // after it.
+  //
+  // Structure:
+  //   crater touch (v77 open crater)
+  //     -> transition to Drowned Sky entry room
+  //     -> mid room
+  //     -> boss room with The Drowned Sun
+  //     -> boss dies, Cold Lantern appears, room becomes safe
+  //     -> touch Cold Lantern -> THE LIGHT STAYS DEAD overlay
+  //
+  // Persistence:
+  //   save.victories.drownedSkyClears
+  //   save.defeatedBosses.drownedSun
+  //   First clear: Sun crater visually "seals cold" (subtle change).
+  //
+  // Names are placeholders per user direction — easy to rename later
+  // by editing the V79_NAMES block.
+  // ===================================================================
+  (function installV79DrownedSky() {
+    const V79_VERSION = 'qual.drowned-sky-collapsed-sun.2026-05-13.v79';
+    const CACHE79 = 'no-moon-drowned-sky-collapsed-sun-v79';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v79DrownedSky && state.v79DrownedSky.installed) return;
+
+    const V79_NAMES = {
+      biome: 'The Drowned Sky',
+      bossDisplay: 'The Drowned Sun',
+      bossBar: 'THE DROWNED SUN',
+      trophy: 'Cold Lantern',
+      winTitle: 'THE LIGHT STAYS DEAD',
+      winBody: 'You followed the Sun into the place underneath light, and brought back a Cold Lantern.'
+    };
+
+    const sys = state.v79DrownedSky = {
+      installed: true,
+      version: V79_VERSION,
+      cacheExpected: CACHE79,
+      names: V79_NAMES,
+      stats: {
+        craterEntries: 0,
+        roomsInstalled: 0,
+        enemiesSpawned: 0,
+        bossSpawned: 0,
+        bossDefeated: 0,
+        coldLanternTouched: 0,
+        winsRecorded: 0,
+        lastError: null
+      }
+    };
+
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+    const SAVE79 = (typeof SAVE_KEY !== 'undefined' && SAVE_KEY) ? SAVE_KEY : 'noMoonSave_v1';
+    const MIRROR79 = 'noMoonProgress_v68';
+    const TAU79 = (typeof TAU !== 'undefined') ? TAU : Math.PI * 2;
+
+    function log79(e, where) {
+      const msg = (where || 'v79') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v79]', msg, e); } catch (_) {}
+    }
+
+    function tag79() { try { state.buildTag = V79_VERSION; } catch (_) {} }
+
+    function rgba79(hex, a) {
+      try { if (typeof rgba === 'function') return rgba(hex, a); } catch (_) {}
+      let h = String(hex || '#fff').replace('#', '');
+      if (h.length === 3) h = h.split('').map(c => c + c).join('');
+      const n = parseInt(h, 16);
+      if (!Number.isFinite(n)) return 'rgba(255,255,255,' + a + ')';
+      return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+
+    // -----------------------------------------------------------------
+    // Enemy type registrations
+    // -----------------------------------------------------------------
+    function registerEnemies79() {
+      try {
+        if (typeof ENEMY_TYPES === 'undefined' || !ENEMY_TYPES) return;
+        if (!ENEMY_TYPES.v79Orbiter) {
+          ENEMY_TYPES.v79Orbiter = { display: 'Cold Orbiter', cost: 4, r: 14, hp: 4, speed: 110, color: '#bde7ff', wake: 9999, behavior: 'v79Orbiter', boss: false };
+        }
+        if (!ENEMY_TYPES.v79WakeComet) {
+          ENEMY_TYPES.v79WakeComet = { display: 'Wake Comet', cost: 6, r: 17, hp: 6, speed: 170, color: '#a89bff', wake: 9999, behavior: 'v79WakeComet', boss: false };
+        }
+        if (!ENEMY_TYPES.v79DrownedSun) {
+          ENEMY_TYPES.v79DrownedSun = { display: V79_NAMES.bossDisplay, cost: 99, r: 60, hp: 140, speed: 70, color: '#5a7bff', wake: 9999, behavior: 'v79DrownedSun', boss: true };
+        }
+      } catch (e) { log79(e, 'registerEnemies'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Background painter (offscreen canvas — baked once per room)
+    // -----------------------------------------------------------------
+    function makeDrownedSkyBackground79(room, kind) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = room.width; c.height = room.height;
+        const g = c.getContext('2d');
+        const w = room.width, h = room.height;
+        const grad = g.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, '#010210');
+        grad.addColorStop(0.55, '#000008');
+        grad.addColorStop(1, '#000003');
+        g.fillStyle = grad; g.fillRect(0, 0, w, h);
+        // Distant starfield
+        for (let i = 0; i < 880; i++) {
+          const x = Math.random() * w;
+          const y = Math.random() * h;
+          const bright = Math.random() < 0.10;
+          const r = bright ? 0.9 + Math.random() * 1.4 : 0.4 + Math.random() * 0.9;
+          g.fillStyle = bright
+            ? rgba79('#ffffff', 0.18 + Math.random() * 0.24)
+            : rgba79('#bde7ff', 0.05 + Math.random() * 0.12);
+          g.beginPath(); g.arc(x, y, r, 0, TAU79); g.fill();
+        }
+        // Cold nebula
+        const neb = g.createRadialGradient(w * 0.5, h * 0.55, 40, w * 0.5, h * 0.55, Math.max(w, h) * 0.62);
+        neb.addColorStop(0, rgba79('#5a7bff', 0.13));
+        neb.addColorStop(0.4, rgba79('#7a5aff', 0.05));
+        neb.addColorStop(1, rgba79('#000000', 0));
+        g.fillStyle = neb; g.fillRect(0, 0, w, h);
+        // Ferry-rail glyphs faintly cutting horizontally
+        g.strokeStyle = rgba79('#a89bff', 0.06);
+        g.lineWidth = 2;
+        for (let i = 0; i < 5; i++) {
+          const y = h * (0.22 + i * 0.16);
+          g.beginPath();
+          for (let x = -40; x < w + 80; x += 60) {
+            const yy = y + Math.sin(x * 0.012 + i) * 22;
+            if (x < -30) g.moveTo(x, yy); else g.lineTo(x, yy);
+          }
+          g.stroke();
+        }
+        // Boss arena gets a heavier dark "well" gradient at center
+        if (kind === 'boss') {
+          const well = g.createRadialGradient(w * 0.5, h * 0.48, 12, w * 0.5, h * 0.48, Math.min(w, h) * 0.48);
+          well.addColorStop(0, rgba79('#000000', 0.78));
+          well.addColorStop(0.45, rgba79('#02030c', 0.42));
+          well.addColorStop(1, rgba79('#02030c', 0));
+          g.fillStyle = well; g.fillRect(0, 0, w, h);
+        }
+        return c;
+      } catch (e) { log79(e, 'makeBackground'); return null; }
+    }
+
+    // -----------------------------------------------------------------
+    // Beacon helpers — small navigation lights that subtly pulse
+    // -----------------------------------------------------------------
+    function makeBeacons79(room, count) {
+      const beacons = [];
+      const w = room.width, h = room.height, wall = room.wall || 80;
+      for (let i = 0; i < count; i++) {
+        beacons.push({
+          x: wall + 90 + Math.random() * (w - wall * 2 - 180),
+          y: wall + 90 + Math.random() * (h - wall * 2 - 180),
+          r: 26 + Math.random() * 10,
+          phase: Math.random() * TAU79,
+          tint: Math.random() < 0.5 ? '#bde7ff' : '#a89bff'
+        });
+      }
+      return beacons;
+    }
+    function drawBeacon79(b, t) {
+      try {
+        const pulse = 0.55 + 0.45 * Math.sin(t * 1.2 + b.phase);
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 1.6);
+        grad.addColorStop(0, rgba79(b.tint, 0.34 * pulse));
+        grad.addColorStop(0.45, rgba79(b.tint, 0.10 * pulse));
+        grad.addColorStop(1, rgba79('#000000', 0));
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.6, 0, TAU79); ctx.fill();
+        ctx.strokeStyle = rgba79(b.tint, 0.62);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.42, 0, TAU79); ctx.stroke();
+        ctx.fillStyle = rgba79('#ffffff', 0.42 * pulse);
+        ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, TAU79); ctx.fill();
+        ctx.restore();
+      } catch (e) { log79(e, 'drawBeacon'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Room generator
+    // -----------------------------------------------------------------
+    function makeDrownedRoom79(level, baseId, seq, isBoss) {
+      const w = isBoss ? 1280 : 1140 + seq * 30;
+      const h = isBoss ? 920 : 820 + seq * 24;
+      const room = {
+        id: baseId,
+        kind: isBoss ? 'exit' : 'normal',
+        depth: 199 + seq,
+        gx: 79 + seq, gy: 99,
+        entered: false,
+        explored: false,
+        hasBoss: false,
+        hasBossArena: false,
+        index: level.index,
+        biome: { id: 'v79DrownedSky', name: V79_NAMES.biome, top: '#01030f', bottom: '#000005', accent: '#bde7ff', accent2: '#a89bff', shot: '#dff6ff' },
+        routeTheme: { family: 'v79DrownedSky', features: ['stars'] },
+        featureSet: ['stars'],
+        layoutMode: 'spine',
+        ambientMode: 'orbs',
+        obstacleStyle: 'archivePillar',
+        width: w, height: h, wall: 80,
+        obstacles: [],
+        ambient: [],
+        background: null,
+        veils: [],
+        annexes: [],
+        hazards: [],
+        pickups: [],
+        traps: [],
+        enemies: [],
+        layoutPhase: Math.random() * TAU79,
+        ringCenter: { x: w * 0.5, y: h * 0.5 },
+        pockets: [],
+        obstaclePalette: ['archivePillar'],
+        wallPalette: [],
+        spawn: { x: w * 0.5, y: h * 0.78, r: 60 },
+        exit: { x: w * 0.5, y: h * 0.5, r: isBoss ? 0 : 0, active: false },
+        secret: { x: -9999, y: -9999, r: 0, hidden: true, revealed: false, collected: false, hint: false, rewardId: 'repair' },
+        cleared: false,
+        doorSize: 154,
+        doors: [],
+        breakableObstacleId: null,
+        showSpawnGlyph: false,
+        showExitGlyph: false,
+        _v79DrownedSky: true,
+        _v79RoomSeq: seq,
+        _v79IsBoss: !!isBoss,
+        _v79Label: isBoss ? 'The Drowned Well' : ('Drowned Sky ' + (seq + 1))
+      };
+      // Add 2-3 cover obstacles in non-boss rooms
+      if (!isBoss) {
+        for (let i = 0; i < 3; i++) {
+          const ox = w * (0.30 + (i % 2) * 0.40) + (Math.random() - 0.5) * 80;
+          const oy = h * (0.32 + Math.floor(i / 2) * 0.38) + (Math.random() - 0.5) * 60;
+          room.obstacles.push({ x: ox, y: oy, r: 26 + Math.random() * 22, seed: Math.random() * 9999, variant: Math.floor(Math.random() * 3), style: 'archivePillar', shape: 'circle', breakable: false, hp: 0, maxHp: 0, hiddenItemId: null });
+        }
+      }
+      // Drifting ambient particles (the cold tide)
+      for (let i = 0; i < (isBoss ? 50 : 36); i++) {
+        room.ambient.push({
+          x: Math.random() * w, y: Math.random() * h,
+          r: 1.0 + Math.random() * 3.4,
+          alpha: 0.06 + Math.random() * 0.22,
+          vx: (Math.random() - 0.5) * 18,
+          vy: 8 + Math.random() * 28,
+          phase: Math.random() * TAU79,
+          rot: Math.random() * TAU79,
+          spin: (Math.random() - 0.5) * 0.6,
+          tint: Math.random() < 0.5 ? '#bde7ff' : '#a89bff'
+        });
+      }
+      room._v79Beacons = makeBeacons79(room, isBoss ? 4 : 3);
+      room.background = makeDrownedSkyBackground79(room, isBoss ? 'boss' : 'standard');
+      return room;
+    }
+
+    // -----------------------------------------------------------------
+    // Crater touch -> level transition
+    // -----------------------------------------------------------------
+    function installDrownedSky79() {
+      try {
+        if (!state.level || !Array.isArray(state.level.rooms)) return false;
+        const level = state.level;
+        const throne = level.rooms[level.currentRoomId || 0];
+        if (!throne) return false;
+        // Record the Sun victory if it hasn't been recorded yet — entering
+        // the well still counts as beating the Sun. Don't trigger overlay.
+        try {
+          if (state.save) {
+            state.save.victories = state.save.victories || {};
+            if (!state.save.victories._v79CountedSunThisRun) {
+              state.save.victories.sunClears = Math.max(1, N(state.save.victories.sunClears) + 1);
+              state.save.victories._v79CountedSunThisRun = true;
+            }
+          }
+        } catch (_) {}
+        // Build the 3 rooms (entry, mid, boss) and push them onto the level.
+        const baseId = level.rooms.length;
+        const r1 = makeDrownedRoom79(level, baseId,     0, false);
+        const r2 = makeDrownedRoom79(level, baseId + 1, 1, false);
+        const r3 = makeDrownedRoom79(level, baseId + 2, 2, true);
+        // Doors: throne crater -> r1, r1 -> r2 when cleared, r2 -> r3 when cleared
+        r1._v79Doors = [
+          { kind: 'side', x: r1.width - 110, y: r1.height * 0.5, r: 44, to: r2.id, needsCleared: true, active: true, arrive: { x: 188, y: r2.height * 0.5 } }
+        ];
+        r2._v79Doors = [
+          { kind: 'back', x: 110, y: r2.height * 0.5, r: 38, to: r1.id, active: true, arrive: { x: r1.width - 188, y: r1.height * 0.5 } },
+          { kind: 'side', x: r2.width - 110, y: r2.height * 0.5, r: 44, to: r3.id, needsCleared: true, active: true, arrive: { x: r3.width * 0.5, y: r3.height * 0.78 } }
+        ];
+        r3._v79Doors = [
+          { kind: 'back', x: 110, y: r3.height * 0.78, r: 38, to: r2.id, active: true, arrive: { x: r2.width - 188, y: r2.height * 0.5 } }
+        ];
+        level.rooms.push(r1, r2, r3);
+        sys.stats.roomsInstalled += 3;
+        // Spawn enemies in r1 and r2
+        spawnRoomEnemies79(r1, 2);
+        spawnRoomEnemies79(r2, 3);
+        // Spawn the boss in r3
+        spawnDrownedSun79(r3);
+        // Transition: fade then teleport into r1.
+        if (typeof triggerTransition === 'function') {
+          triggerTransition(function () {
+            try {
+              syncActiveRoom(level, r1.id, null);
+              if (state.player) {
+                state.player.x = r1.width * 0.5;
+                state.player.y = r1.height * 0.78;
+                state.camera.x = state.player.x;
+                state.camera.y = state.player.y;
+                state.player.hitInvuln = Math.max(N(state.player.hitInvuln), 1.4);
+              }
+              try { recomputePlayerStats(false); } catch (_) {}
+              try { if (typeof pushMessage === 'function') pushMessage('THE WELL IS COLD', '#bde7ff', 22, 2.0, 0.22); } catch (_) {}
+            } catch (e) { log79(e, 'transition cb'); }
+          });
+        }
+        sys.stats.craterEntries += 1;
+        state._v79InDrownedSky = true;
+        return true;
+      } catch (e) { log79(e, 'installDrownedSky'); return false; }
+    }
+
+    function spawnRoomEnemies79(room, count) {
+      try {
+        if (typeof createEnemy !== 'function') return;
+        const types = ['v79Orbiter', 'v79WakeComet'];
+        for (let i = 0; i < count; i++) {
+          const t = types[i % types.length];
+          const e = createEnemy(t, room.width * (0.32 + 0.20 * i), room.height * (0.36 + 0.12 * (i % 2)), state.levelIndex || 0);
+          if (e) {
+            e.wakeRadius = Math.max(e.wakeRadius || 0, 9999);
+            room.enemies.push(e);
+            sys.stats.enemiesSpawned += 1;
+          }
+        }
+      } catch (e) { log79(e, 'spawnRoomEnemies'); }
+    }
+
+    function spawnDrownedSun79(room) {
+      try {
+        if (typeof createEnemy !== 'function') return null;
+        const boss = createEnemy('v79DrownedSun', room.width * 0.5, room.height * 0.40, state.levelIndex || 0);
+        if (!boss) return null;
+        boss.wakeRadius = 9999;
+        boss._v79Phase = 1;
+        boss._v79FireCd = 1.4;
+        boss._v79RingCd = 3.6;
+        boss._v79SpawnCd = 6.0;
+        boss._v79SweepCd = 5.0;
+        boss._v79DrownedSun = true;
+        room.enemies.push(boss);
+        sys.stats.bossSpawned += 1;
+        return boss;
+      } catch (e) { log79(e, 'spawnBoss'); return null; }
+    }
+
+    // -----------------------------------------------------------------
+    // Per-tick logic for v79 enemies + boss
+    // -----------------------------------------------------------------
+    function tickV79Orbiter(e, dt) {
+      try {
+        const p = state.player; if (!p) return;
+        const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+        const target = 220;
+        const radial = (d - target) * 0.55;
+        const dirX = dx / d, dirY = dy / d;
+        const perpX = -dirY, perpY = dirX;
+        e.vx = (e.vx || 0) * 0.78 + (perpX * (e.speed || 100) + dirX * radial) * 0.22;
+        e.vy = (e.vy || 0) * 0.78 + (perpY * (e.speed || 100) + dirY * radial) * 0.22;
+        e.angle = Math.atan2(dirY, dirX);
+        try { if (typeof moveEntity === 'function') moveEntity(e, e.vx * dt, e.vy * dt); else { e.x += e.vx * dt; e.y += e.vy * dt; } } catch (_) {}
+        e.fireCd = Math.max(0, N(e.fireCd) - dt);
+        if (e.fireCd <= 0 && d < 520 && typeof fireEnemyBurst === 'function') {
+          fireEnemyBurst(e, 1, 0, 240 + (state.levelIndex || 0) * 5, 3.2, 1, 4.2, '#bde7ff');
+          e.fireCd = 1.0 + Math.random() * 0.6;
+        }
+      } catch (err) { log79(err, 'tickOrbiter'); }
+    }
+    function tickV79WakeComet(e, dt) {
+      try {
+        const p = state.player; if (!p) return;
+        const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+        const dirX = dx / d, dirY = dy / d;
+        e._v79DashTele = N(e._v79DashTele) - dt;
+        e._v79DashActive = N(e._v79DashActive) - dt;
+        e._v79DashCd = N(e._v79DashCd) - dt;
+        if (e._v79DashActive > 0 && e._v79DashDirX != null) {
+          // Active dash
+          const speed = (e.speed || 160) * 2.4;
+          e.vx = e._v79DashDirX * speed;
+          e.vy = e._v79DashDirY * speed;
+        } else if (e._v79DashTele > 0 && e._v79DashDirX != null) {
+          // Telegraphing — slow
+          e.vx *= 0.86; e.vy *= 0.86;
+        } else if (e._v79DashCd <= 0 && d < 620) {
+          // Begin telegraph
+          e._v79DashDirX = dirX;
+          e._v79DashDirY = dirY;
+          e._v79DashTele = 0.5;
+          e._v79DashActive = 0;
+          e._v79DashCd = 2.0 + Math.random() * 1.4;
+        } else {
+          // Drift toward target slowly
+          e.vx = (e.vx || 0) * 0.84 + dirX * (e.speed || 160) * 0.10;
+          e.vy = (e.vy || 0) * 0.84 + dirY * (e.speed || 160) * 0.10;
+        }
+        if (e._v79DashTele <= 0 && e._v79DashActive <= 0 && e._v79DashDirX != null && !e._v79DashFired) {
+          // End of telegraph -> start dash
+          e._v79DashActive = 0.40;
+          e._v79DashFired = true;
+        }
+        if (e._v79DashActive <= 0 && e._v79DashFired) {
+          // Dash done, clear
+          e._v79DashDirX = null;
+          e._v79DashDirY = null;
+          e._v79DashFired = false;
+        }
+        e.angle = Math.atan2(dirY, dirX);
+        try { if (typeof moveEntity === 'function') moveEntity(e, e.vx * dt, e.vy * dt); else { e.x += e.vx * dt; e.y += e.vy * dt; } } catch (_) {}
+      } catch (err) { log79(err, 'tickComet'); }
+    }
+    function tickV79DrownedSun(e, dt) {
+      try {
+        const p = state.player; if (!p) return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null) || (state.level && state.level.currentRoom);
+        if (!room) return;
+        const hp = N(e.hp), maxHp = N(e.maxHp, 140);
+        const wantPhase = hp / Math.max(1, maxHp) <= 0.5 ? 2 : 1;
+        if (wantPhase !== N(e._v79Phase, 1)) {
+          e._v79Phase = wantPhase;
+          state._v79SunPhaseFlash = 1.0;
+          try { if (typeof shake === 'function') shake(14); } catch (_) {}
+          try { if (typeof spawnRing === 'function') spawnRing(e.x, e.y, '#ffffff', 280); } catch (_) {}
+        }
+        const phase = N(e._v79Phase, 1);
+        const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
+        const dirX = dx / d, dirY = dy / d;
+        if (phase === 1) {
+          // Slow center drift
+          const cx = room.width * 0.5, cy = room.height * 0.42;
+          e.x = cx + Math.sin((state.time || 0) * 0.40) * 36;
+          e.y = cy + Math.cos((state.time || 0) * 0.32) * 24;
+          e.vx = 0; e.vy = 0; e.angle += dt * 0.10;
+          e._v79FireCd = Math.max(0, N(e._v79FireCd) - dt);
+          e._v79RingCd = Math.max(0, N(e._v79RingCd) - dt);
+          e._v79SpawnCd = Math.max(0, N(e._v79SpawnCd) - dt);
+          if (e._v79RingCd <= 0 && typeof fireEnemyRing === 'function') {
+            fireEnemyRing(e, 12, 200 + (state.levelIndex || 0) * 4, 4.0, 1, 4.8, '#bde7ff', (state.time || 0) * 0.3);
+            e._v79RingCd = 2.4;
+          }
+          if (e._v79FireCd <= 0 && typeof fireEnemyBurst === 'function') {
+            fireEnemyBurst(e, 3, 0.32, 240 + (state.levelIndex || 0) * 5, 3.6, 1, 4.5, '#a89bff');
+            e._v79FireCd = 1.8;
+          }
+          if (e._v79SpawnCd <= 0 && typeof createEnemy === 'function') {
+            const orb = createEnemy('v79Orbiter', e.x + (Math.random() - 0.5) * 80, e.y + 80 + (Math.random() - 0.5) * 40, state.levelIndex || 0);
+            if (orb && room.enemies) {
+              orb.wakeRadius = 9999;
+              room.enemies.push(orb);
+              if (state.enemies !== room.enemies) state.enemies.push(orb);
+            }
+            e._v79SpawnCd = 7.5;
+          }
+        } else {
+          // Faster orbit, aimed bursts, sweep rays
+          const orbit = (state.time || 0) * 0.50;
+          const tx = room.width * 0.5 + Math.cos(orbit) * room.width * 0.22;
+          const ty = room.height * 0.42 + Math.sin(orbit * 1.2) * room.height * 0.18;
+          e.vx = (e.vx || 0) * 0.80 + (tx - e.x) * 0.030;
+          e.vy = (e.vy || 0) * 0.80 + (ty - e.y) * 0.030;
+          try { if (typeof moveEntity === 'function') moveEntity(e, e.vx * dt, e.vy * dt); else { e.x += e.vx * dt; e.y += e.vy * dt; } } catch (_) {}
+          e.angle = Math.atan2(dirY, dirX);
+          e._v79FireCd = Math.max(0, N(e._v79FireCd) - dt);
+          e._v79RingCd = Math.max(0, N(e._v79RingCd) - dt);
+          e._v79SweepCd = Math.max(0, N(e._v79SweepCd) - dt);
+          if (e._v79FireCd <= 0 && typeof fireEnemyBurst === 'function') {
+            fireEnemyBurst(e, 5, 0.55, 280 + (state.levelIndex || 0) * 7, 3.6, 1, 4.6, '#a89bff');
+            e._v79FireCd = 1.1;
+          }
+          if (e._v79RingCd <= 0 && typeof fireEnemyRing === 'function') {
+            fireEnemyRing(e, 16, 240 + (state.levelIndex || 0) * 5, 4.0, 1, 4.8, '#ffffff', (state.time || 0) * 0.42);
+            e._v79RingCd = 1.8;
+          }
+          if (e._v79SweepCd <= 0 && typeof fireEnemyBurst === 'function') {
+            // Sweep ray: 9 bullets in a tight forward fan
+            const ang = Math.atan2(dirY, dirX);
+            for (let i = -4; i <= 4; i++) {
+              const a = ang + i * 0.07;
+              const speed = 320;
+              if (typeof state.bullets !== 'undefined' && Array.isArray(state.bullets)) {
+                state.bullets.push({ owner: 'enemy', x: e.x, y: e.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 3.0, radius: 4.6, damage: 1, color: '#bde7ff' });
+              }
+            }
+            e._v79SweepCd = 4.5;
+          }
+        }
+        // Bleach a touch during phase transition flash
+        state._v79SunPhaseFlash = Math.max(0, N(state._v79SunPhaseFlash) - dt * 0.7);
+        // Boss-contact damage
+        if (Math.hypot(p.x - e.x, p.y - e.y) < (p.r || 17) + (e.r || 60) + 2) {
+          try { if (typeof damagePlayer === 'function') damagePlayer(1); } catch (_) {}
+        }
+      } catch (err) { log79(err, 'tickBoss'); }
+    }
+
+    // Hook updateEnemies for our types
+    if (typeof updateEnemies === 'function' && !updateEnemies.__v79DrownedSky) {
+      const baseUpdateEnemies79 = updateEnemies;
+      updateEnemies = function (dt) {
+        const out = baseUpdateEnemies79.apply(this, arguments);
+        try {
+          if (state.mode === 'play') {
+            for (const e of state.enemies || []) {
+              if (!e || e.remove) continue;
+              if (e.behavior === 'v79Orbiter') tickV79Orbiter(e, dt);
+              else if (e.behavior === 'v79WakeComet') tickV79WakeComet(e, dt);
+              else if (e.behavior === 'v79DrownedSun') tickV79DrownedSun(e, dt);
+            }
+          }
+        } catch (e) { log79(e, 'updateEnemies post'); }
+        return out;
+      };
+      updateEnemies.__v79DrownedSky = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Drawing v79 enemies + boss
+    // -----------------------------------------------------------------
+    function drawV79Enemy(e) {
+      try {
+        ctx.save();
+        ctx.translate(e.x, e.y);
+        ctx.rotate(e.angle || 0);
+        const id = e.typeId;
+        if (id === 'v79Orbiter') {
+          ctx.fillStyle = rgba79('#02030a', 0.86);
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU79); ctx.fill();
+          ctx.strokeStyle = rgba79('#bde7ff', 0.74);
+          ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU79); ctx.stroke();
+          // Crescent
+          ctx.fillStyle = rgba79('#dff6ff', 0.62);
+          ctx.beginPath(); ctx.arc(-3, 0, e.r * 0.5, -Math.PI * 0.6, Math.PI * 0.6); ctx.fill();
+          // Wake dot
+          ctx.fillStyle = rgba79('#ffffff', 0.42);
+          ctx.beginPath(); ctx.arc(-e.r - 4, 0, 2, 0, TAU79); ctx.fill();
+        } else if (id === 'v79WakeComet') {
+          const teleing = N(e._v79DashTele) > 0;
+          const dashing = N(e._v79DashActive) > 0;
+          ctx.fillStyle = rgba79(dashing ? '#ffffff' : '#02030a', dashing ? 0.92 : 0.86);
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU79); ctx.fill();
+          ctx.strokeStyle = rgba79(dashing ? '#ffffff' : (teleing ? '#ffe6a8' : '#a89bff'), teleing ? 0.90 : 0.74);
+          ctx.lineWidth = teleing ? 2.4 : 1.8;
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU79); ctx.stroke();
+          // Tail
+          if (e._v79DashDirX != null) {
+            const tailLen = teleing ? 50 : 26;
+            ctx.strokeStyle = rgba79(teleing ? '#ffe6a8' : '#a89bff', teleing ? 0.62 : 0.28);
+            ctx.lineWidth = teleing ? 4 : 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(-e._v79DashDirX * tailLen * Math.cos(e.angle || 0) - e._v79DashDirY * tailLen * Math.sin(e.angle || 0), 0);
+            ctx.stroke();
+          }
+        } else if (id === 'v79DrownedSun') {
+          const phase = N(e._v79Phase, 1);
+          const flash = Math.max(0, Math.min(1, N(state._v79SunPhaseFlash)));
+          // Dark core
+          ctx.fillStyle = rgba79('#000000', 0.94);
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU79); ctx.fill();
+          // Cold corona
+          const corona = ctx.createRadialGradient(0, 0, e.r * 0.7, 0, 0, e.r * (phase === 2 ? 1.9 : 1.6));
+          corona.addColorStop(0, rgba79(phase === 2 ? '#a89bff' : '#5a7bff', 0.66));
+          corona.addColorStop(0.5, rgba79(phase === 2 ? '#7a5aff' : '#3050ff', 0.28));
+          corona.addColorStop(1, rgba79('#000000', 0));
+          ctx.fillStyle = corona;
+          ctx.beginPath(); ctx.arc(0, 0, e.r * (phase === 2 ? 1.9 : 1.6), 0, TAU79); ctx.fill();
+          // Rim
+          ctx.strokeStyle = rgba79(phase === 2 ? '#ffffff' : '#bde7ff', 0.62);
+          ctx.lineWidth = 2.2;
+          ctx.beginPath(); ctx.arc(0, 0, e.r, 0, TAU79); ctx.stroke();
+          // Flares spinning
+          ctx.save();
+          ctx.rotate((state.time || 0) * (phase === 2 ? 0.9 : 0.4));
+          ctx.strokeStyle = rgba79(phase === 2 ? '#ffffff' : '#a89bff', 0.38);
+          ctx.lineWidth = 2;
+          for (let i = 0; i < 8; i++) {
+            const a = i * TAU79 / 8;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * e.r * 0.9, Math.sin(a) * e.r * 0.9);
+            ctx.lineTo(Math.cos(a) * e.r * 1.5, Math.sin(a) * e.r * 1.5);
+            ctx.stroke();
+          }
+          ctx.restore();
+          // Phase flash
+          if (flash > 0.02) {
+            ctx.strokeStyle = rgba79('#ffffff', flash * 0.86);
+            ctx.lineWidth = 3 + flash * 4;
+            ctx.beginPath(); ctx.arc(0, 0, e.r * (1.2 + flash * 0.4), 0, TAU79); ctx.stroke();
+          }
+        }
+        ctx.restore();
+      } catch (e) { log79(e, 'drawEnemy'); }
+    }
+    if (typeof drawEnemy === 'function' && !drawEnemy.__v79DrownedSky) {
+      const baseDrawEnemy79 = drawEnemy;
+      drawEnemy = function (enemy) {
+        if (enemy && /^v79/.test(enemy.typeId || '')) {
+          try { drawV79Enemy(enemy); return; } catch (e) { log79(e, 'drawEnemy hook'); }
+        }
+        return baseDrawEnemy79.apply(this, arguments);
+      };
+      drawEnemy.__v79DrownedSky = true;
+    }
+
+    // Boss bar override for the Drowned Sun
+    if (typeof drawBossBar === 'function' && !drawBossBar.__v79DrownedSky) {
+      const baseBossBar79 = drawBossBar;
+      drawBossBar = function () {
+        const boss = state.enemies && state.enemies.find(function (e) { return e && e.typeId === 'v79DrownedSun' && !e.remove; });
+        if (!boss) return baseBossBar79.apply(this, arguments);
+        try {
+          const pct = Math.max(0, Math.min(1, N(boss.hp) / Math.max(1, N(boss.maxHp, 140))));
+          const compact = W < 760;
+          const w = Math.min(compact ? Math.max(188, W - 152) : 380, W - 96);
+          const h = compact ? 10 : 12;
+          const x = W * 0.5 - w * 0.5;
+          const y = compact ? 10 : 12;
+          ctx.save();
+          ctx.fillStyle = 'rgba(8,4,28,0.78)';
+          ctx.beginPath();
+          if (typeof roundRectPath === 'function') roundRectPath(ctx, x - 8, y - 2, w + 16, 30, 14);
+          else ctx.rect(x - 8, y - 2, w + 16, 30);
+          ctx.fill();
+          ctx.font = compact ? '700 10px Inter, system-ui, sans-serif' : '700 12px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#bde7ff';
+          ctx.fillText(V79_NAMES.bossBar, W * 0.5, y + 9);
+          ctx.fillStyle = 'rgba(255,255,255,0.10)';
+          ctx.beginPath();
+          if (typeof roundRectPath === 'function') roundRectPath(ctx, x, y + 13, w, h, 7);
+          else ctx.rect(x, y + 13, w, h);
+          ctx.fill();
+          const grd = ctx.createLinearGradient(x, y, x + w, y);
+          grd.addColorStop(0, '#5a7bff');
+          grd.addColorStop(1, '#a89bff');
+          ctx.fillStyle = grd;
+          ctx.beginPath();
+          if (typeof roundRectPath === 'function') roundRectPath(ctx, x + 1, y + 14, (w - 2) * pct, h - 2, 6);
+          else ctx.rect(x + 1, y + 14, (w - 2) * pct, h - 2);
+          ctx.fill();
+          ctx.restore();
+        } catch (e) { log79(e, 'drawBossBar'); }
+      };
+      drawBossBar.__v79DrownedSky = true;
+    }
+
+    // -----------------------------------------------------------------
+    // World overlays: beacons, doors, cold lantern, crater seal trophy
+    // -----------------------------------------------------------------
+    function drawV79World() {
+      try {
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !room._v79DrownedSky) return;
+        const t = N(state.time);
+        ctx.save();
+        ctx.translate(-state.camera.x + (typeof playViewCenterX === 'function' ? playViewCenterX() : W * 0.5),
+                      -state.camera.y + (typeof playViewCenterY === 'function' ? playViewCenterY() : H * 0.5));
+        if (Array.isArray(room._v79Beacons)) {
+          for (const b of room._v79Beacons) drawBeacon79(b, t);
+        }
+        if (Array.isArray(room._v79Doors)) {
+          for (const door of room._v79Doors) drawDoor79(door, room);
+        }
+        if (room._v79ColdLantern) drawColdLantern79(room._v79ColdLantern);
+        ctx.restore();
+      } catch (e) { log79(e, 'drawV79World'); }
+    }
+    function drawDoor79(door, room) {
+      try {
+        const active = door.active !== false && (!door.needsCleared || room.cleared);
+        const r = door.r || 42;
+        const alpha = active ? 1 : 0.30;
+        const t = N(state.time);
+        ctx.save();
+        ctx.translate(door.x, door.y);
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = rgba79('#02030a', 0.78 * alpha);
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.06, r * 0.66, 0, 0, TAU79); ctx.fill();
+        ctx.strokeStyle = rgba79('#bde7ff', 0.62 * alpha);
+        ctx.lineWidth = 2.8;
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 1.10, r * 0.70, 0, 0, TAU79); ctx.stroke();
+        for (let i = 0; i < 8; i++) {
+          const a = i * TAU79 / 8 + t * 0.45;
+          ctx.fillStyle = rgba79(i % 2 ? '#a89bff' : '#bde7ff', 0.24 * alpha);
+          ctx.beginPath(); ctx.arc(Math.cos(a) * r * 0.92, Math.sin(a) * r * 0.45, 2, 0, TAU79); ctx.fill();
+        }
+        ctx.restore();
+      } catch (e) { log79(e, 'drawDoor'); }
+    }
+    function drawColdLantern79(c) {
+      try {
+        const t = N(state.time);
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.globalCompositeOperation = 'screen';
+        // Outer halo
+        const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, c.r * 2.4);
+        halo.addColorStop(0, rgba79('#bde7ff', 0.46));
+        halo.addColorStop(0.5, rgba79('#a89bff', 0.16));
+        halo.addColorStop(1, rgba79('#000000', 0));
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(0, 0, c.r * 2.4, 0, TAU79); ctx.fill();
+        // Frame ring (broken sun frame)
+        ctx.strokeStyle = rgba79('#a89bff', 0.72);
+        ctx.lineWidth = 3;
+        ctx.setLineDash([14, 8]);
+        ctx.lineDashOffset = -t * 12;
+        ctx.beginPath(); ctx.arc(0, 0, c.r, 0, TAU79); ctx.stroke();
+        ctx.setLineDash([]);
+        // Cold star inside
+        const pulse = 0.7 + 0.3 * Math.sin(t * 2.4);
+        ctx.fillStyle = rgba79('#ffffff', 0.86 * pulse);
+        ctx.beginPath(); ctx.arc(0, 0, 6 + 2 * pulse, 0, TAU79); ctx.fill();
+        ctx.strokeStyle = rgba79('#dff6ff', 0.62);
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 6; i++) {
+          const a = i * TAU79 / 6 + t * 0.4;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
+          ctx.lineTo(Math.cos(a) * 18, Math.sin(a) * 18);
+          ctx.stroke();
+        }
+        // Inner ring (orbit hint)
+        ctx.strokeStyle = rgba79('#bde7ff', 0.36);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(0, 0, c.r * 0.62, 0, TAU79); ctx.stroke();
+        ctx.restore();
+      } catch (e) { log79(e, 'drawColdLantern'); }
+    }
+    if (typeof renderWorld === 'function' && !renderWorld.__v79DrownedSky) {
+      const baseRender79 = renderWorld;
+      renderWorld = function () {
+        const out = baseRender79.apply(this, arguments);
+        try { drawV79World(); } catch (e) { log79(e, 'renderWorld'); }
+        return out;
+      };
+      renderWorld.__v79DrownedSky = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Tick: door + Cold Lantern detection, boss-death watch
+    // -----------------------------------------------------------------
+    function tickV79Doors(dt) {
+      try {
+        if (state.mode !== 'play' || !state.player) return;
+        if (state.transition && state.transition.active) return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !Array.isArray(room._v79Doors)) return;
+        for (const door of room._v79Doors) {
+          const active = door.active !== false && (!door.needsCleared || room.cleared);
+          if (!active) continue;
+          const dx = state.player.x - door.x, dy = state.player.y - door.y;
+          if (Math.hypot(dx, dy) < (door.r || 44) + state.player.r + 6) {
+            // Use door
+            if (state.roomHopCd > 0) return;
+            const target = state.level && state.level.rooms[door.to];
+            if (!target) return;
+            syncActiveRoom(state.level, target.id, null);
+            if (door.arrive && state.player) {
+              state.player.x = door.arrive.x;
+              state.player.y = door.arrive.y;
+              state.camera.x = state.player.x;
+              state.camera.y = state.player.y;
+            }
+            state.roomHopCd = 0.24;
+            try { if (typeof spawnRing === 'function') spawnRing(state.player.x, state.player.y, '#bde7ff', 56); } catch (_) {}
+            break;
+          }
+        }
+      } catch (e) { log79(e, 'tickDoors'); }
+    }
+    function tickV79ColdLantern(dt) {
+      try {
+        if (state.mode !== 'play' || !state.player) return;
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room || !room._v79ColdLantern) return;
+        const c = room._v79ColdLantern;
+        if (c.touched) return;
+        const dx = state.player.x - c.x, dy = state.player.y - c.y;
+        if (Math.hypot(dx, dy) < c.r + state.player.r + 4) {
+          c.touched = true;
+          sys.stats.coldLanternTouched += 1;
+          completeDrownedSkyVictory79();
+        }
+      } catch (e) { log79(e, 'tickColdLantern'); }
+    }
+    if (typeof updateGame === 'function' && !updateGame.__v79DrownedSky) {
+      const baseUpdate79 = updateGame;
+      updateGame = function (dt) {
+        // PRE: crater detection — beat v77's crater.active=false handler.
+        try {
+          if (state.mode === 'play' && !state._v79InDrownedSky && state.player) {
+            const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+            const crater = room && room._v77SunCrater;
+            if (crater && crater.open && crater.active) {
+              const dc = Math.hypot(state.player.x - crater.x, state.player.y - crater.y);
+              if (dc < crater.r * 0.72 + (state.player.r || 17)) {
+                installDrownedSky79();
+                crater.active = false;
+              }
+            }
+          }
+        } catch (e) { log79(e, 'preUpdate'); }
+        const out = baseUpdate79.apply(this, arguments);
+        try {
+          const d = Math.min(0.08, Math.max(0, N(dt)));
+          if (d > 0) {
+            tickV79Doors(d);
+            tickV79ColdLantern(d);
+          }
+        } catch (e) { log79(e, 'updateGame'); }
+        return out;
+      };
+      updateGame.__v79DrownedSky = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Boss death: spawn Cold Lantern + safe the room
+    // -----------------------------------------------------------------
+    if (typeof killEnemy === 'function' && !killEnemy.__v79DrownedSky) {
+      const baseKill79 = killEnemy;
+      killEnemy = function (enemy) {
+        const isBoss = enemy && !enemy.remove && enemy.typeId === 'v79DrownedSun';
+        const bx = isBoss ? enemy.x : 0;
+        const by = isBoss ? enemy.y : 0;
+        const out = baseKill79.apply(this, arguments);
+        if (isBoss) {
+          try {
+            const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+            if (room) {
+              if (typeof state.v77MakeMajorBossRoomSafe === 'function') {
+                state.v77MakeMajorBossRoomSafe(room, 'v79DrownedSun', { color: '#bde7ff', invuln: 999 });
+              } else {
+                if (state.player) state.player.hitInvuln = Math.max(state.player.hitInvuln || 0, 999);
+                if (typeof clearHostileProjectiles === 'function') clearHostileProjectiles();
+              }
+              // Spawn the Cold Lantern at the boss death point.
+              room._v79ColdLantern = { x: bx, y: by, r: 64, touched: false, t: 0, bornAt: N(state.time) };
+              sys.stats.bossDefeated += 1;
+              try { if (typeof spawnRing === 'function') { spawnRing(bx, by, '#ffffff', 360); spawnRing(bx, by, '#bde7ff', 540); } } catch (_) {}
+              try { if (typeof spawnSpark === 'function') for (let i = 0; i < 80; i++) spawnSpark(bx, by, i % 3 ? '#bde7ff' : '#a89bff', 3, 240 + Math.random() * 220); } catch (_) {}
+              try { if (typeof startSlowMo === 'function') startSlowMo(1.6, 0.18); } catch (_) {}
+              try { if (typeof pushMessage === 'function') pushMessage('THE WELL FALLS QUIET', '#bde7ff', 22, 2.4, 0.22); } catch (_) {}
+            }
+          } catch (e) { log79(e, 'killEnemy boss'); }
+        }
+        return out;
+      };
+      killEnemy.__v79DrownedSky = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Victory
+    // -----------------------------------------------------------------
+    function completeDrownedSkyVictory79() {
+      try {
+        recordDrownedSkyVictory79();
+        state.mode = 'win';
+        state.overlayMode = 'win';
+        try { if (typeof closeDraftUI === 'function') closeDraftUI(); } catch (_) {}
+        try { if (typeof commitRunSummary === 'function') commitRunSummary('win'); } catch (_) {}
+        if (typeof overlay !== 'undefined' && overlay) overlay.classList.remove('hidden');
+        if (typeof overlayTitle !== 'undefined' && overlayTitle) overlayTitle.textContent = V79_NAMES.winTitle;
+        if (typeof overlayText !== 'undefined' && overlayText) overlayText.innerHTML = V79_NAMES.winBody;
+        try {
+          if (typeof startBtn !== 'undefined' && startBtn) {
+            const ch = typeof currentSelectedCharacter === 'function' ? currentSelectedCharacter() : null;
+            const name = (ch && ch.name) || 'Passenger';
+            startBtn.textContent = 'Wake in Safe Haven as ' + name;
+          }
+        } catch (_) {}
+        try { if (typeof showOverlay === 'function') showOverlay('win'); } catch (_) {}
+        sys.stats.winsRecorded += 1;
+      } catch (e) { log79(e, 'completeVictory'); }
+    }
+    function recordDrownedSkyVictory79() {
+      try {
+        const save = state.save || {};
+        save.victories = save.victories || {};
+        save.defeatedBosses = save.defeatedBosses || {};
+        save.victories.drownedSkyClears = Math.max(1, N(save.victories.drownedSkyClears) + 1);
+        save.defeatedBosses.drownedSun = true;
+        save.careerAudit = save.careerAudit || {};
+        save.careerAudit.lastDrownedSkyAt = Date.now();
+        save.careerAudit.lastDrownedSkyBuild = V79_VERSION;
+        state.save = save;
+        try {
+          const raw = localStorage.getItem(MIRROR79);
+          const mirror = raw ? JSON.parse(raw) : {};
+          mirror.victories = mirror.victories || {};
+          mirror.defeatedBosses = mirror.defeatedBosses || {};
+          mirror.victories.drownedSkyClears = Math.max(N(mirror.victories.drownedSkyClears), N(save.victories.drownedSkyClears));
+          mirror.defeatedBosses.drownedSun = true;
+          localStorage.setItem(MIRROR79, JSON.stringify(mirror));
+        } catch (_) {}
+        try { if (typeof safeWriteSave === 'function') safeWriteSave(); else localStorage.setItem(SAVE79, JSON.stringify(save)); } catch (_) {}
+      } catch (e) { log79(e, 'recordVictory'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Crater seal trophy on the Sun throne — first Drowned Sky clear marks
+    // the crater visually so the player sees the route has been claimed.
+    // -----------------------------------------------------------------
+    function drowedSkyClearsCount79() {
+      try {
+        const s = state.save || {};
+        const v = s.victories || {};
+        let m = {};
+        try { m = JSON.parse(localStorage.getItem(MIRROR79) || '{}') || {}; } catch (_) {}
+        const mv = m.victories || {};
+        return Math.max(N(v.drownedSkyClears), N(mv.drownedSkyClears));
+      } catch (_) { return 0; }
+    }
+
+    // Patch v77 crater rendering: after first clear, lay a cold-sealed
+    // ring overlay on top of the open crater. We do this by wrapping the
+    // v77 draw helper exposed at state.v77DrawSunCrater.
+    if (state.v77DrawSunCrater && !state.v77DrawSunCrater.__v79CraterTrophy) {
+      const baseDrawCrater = state.v77DrawSunCrater;
+      state.v77DrawSunCrater = function v77DrawSunCraterV79(room) {
+        baseDrawCrater.call(this, room);
+        try {
+          const c = room && room._v77SunCrater;
+          if (!c || !c.open) return;
+          if (drowedSkyClearsCount79() <= 0) return;
+          const t = N(state.time);
+          ctx.save();
+          ctx.globalCompositeOperation = 'screen';
+          // Cold ring on top of the open crater
+          ctx.strokeStyle = rgba79('#bde7ff', 0.52);
+          ctx.lineWidth = 3;
+          ctx.setLineDash([10, 6]);
+          ctx.lineDashOffset = -t * 18;
+          ctx.beginPath(); ctx.ellipse(c.x, c.y, c.r * 1.30, c.r * 0.58, 0, 0, TAU79); ctx.stroke();
+          ctx.setLineDash([]);
+          // Cold lantern dot suspended above the crater rim
+          const pulse = 0.7 + 0.3 * Math.sin(t * 2.1);
+          ctx.fillStyle = rgba79('#ffffff', 0.78 * pulse);
+          ctx.beginPath(); ctx.arc(c.x, c.y - 6, 4 + pulse, 0, TAU79); ctx.fill();
+          ctx.strokeStyle = rgba79('#a89bff', 0.46);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(c.x, c.y - 6, 14, 0, TAU79); ctx.stroke();
+          ctx.restore();
+        } catch (e) { log79(e, 'craterTrophy'); }
+      };
+      state.v77DrawSunCrater.__v79CraterTrophy = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Debug
+    // -----------------------------------------------------------------
+    state.v79Debug = function v79Debug() {
+      const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+      const p = state.player;
+      const save = state.save || {};
+      return {
+        version: V79_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE79,
+        names: V79_NAMES,
+        inDrownedSky: !!state._v79InDrownedSky,
+        room: room && {
+          id: room.id,
+          label: room._v79Label || room.kind,
+          drowned: !!room._v79DrownedSky,
+          cleared: !!room.cleared,
+          enemies: Array.isArray(room.enemies) ? room.enemies.length : null,
+          beacons: Array.isArray(room._v79Beacons) ? room._v79Beacons.length : null,
+          doors: Array.isArray(room._v79Doors) ? room._v79Doors.length : null,
+          coldLantern: !!room._v79ColdLantern,
+          coldLanternTouched: room._v79ColdLantern ? !!room._v79ColdLantern.touched : null
+        },
+        player: p && { hp: p.hp, x: p.x, y: p.y, hitInvuln: p.hitInvuln },
+        drownedSkyClears: drowedSkyClearsCount79(),
+        drownedSunDefeated: !!(save.defeatedBosses && save.defeatedBosses.drownedSun),
+        stats: Object.assign({}, sys.stats),
+        v78: typeof state.v78Debug === 'function' ? state.v78Debug() : null
+      };
+    };
+    state.v79ForceEnter = function () {
+      try {
+        if (!state.level || !state.player) return { ok: false, reason: 'no level/player' };
+        if (!state._v79InDrownedSky) installDrownedSky79();
+        return state.v79Debug();
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+    state.v79ForceKillBoss = function () {
+      try {
+        const room = (typeof currentRoom === 'function' ? currentRoom() : null);
+        if (!room) return { ok: false, reason: 'no room' };
+        const boss = (room.enemies || []).find(function (e) { return e && e.typeId === 'v79DrownedSun' && !e.remove; });
+        if (!boss) return { ok: false, reason: 'no boss' };
+        boss.hp = 0;
+        if (typeof killEnemy === 'function') killEnemy(boss, null);
+        return state.v79Debug();
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+
+    // -----------------------------------------------------------------
+    // Install
+    // -----------------------------------------------------------------
+    try {
+      registerEnemies79();
+      tag79();
+      setTimeout(tag79, 0);
+      setTimeout(tag79, 350);
+      setTimeout(tag79, 1400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V79_DROWNED_SKY__ = sys;
+        window.noMoonV79Debug = function () { return state.v79Debug(); };
+        window.noMoonV79ForceEnter = function () { return state.v79ForceEnter(); };
+        window.noMoonV79ForceKillBoss = function () { return state.v79ForceKillBoss(); };
+      }
+    } catch (e) { log79(e, 'install'); }
+    state.buildTag = V79_VERSION;
+  })();
+
+
   renderCodexStats();
 
 })();

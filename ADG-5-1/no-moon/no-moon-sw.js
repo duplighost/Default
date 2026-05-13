@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-moots-lock-reroll-polish-v78';
+const CACHE_NAME = 'no-moon-drowned-sky-collapsed-sun-v79';
 const ASSETS = [
   './',
   './index.html',
