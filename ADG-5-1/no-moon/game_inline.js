@@ -46393,6 +46393,788 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v81 — Nadir Final Passenger + Drowned Sun Field Guide Card ====
+  // ===================================================================
+  // Final unlockable Passenger: Nadir, Low-Star Diver. Unlocks ONLY after
+  // the player completes the Drowned Sun victory (Cold Lantern touch in
+  // v80's victory flow, which writes save.defeatedBosses.drownedSun).
+  //
+  // Drowned Sun is also added to the v71 Field Guide deck. BOSS_CARDS71
+  // is closure-local in v71, so we DOM-append the 7th card after v71's
+  // render and re-write the count text.
+  //
+  // Nadir has:
+  //  - Custom selection-card visuals (uses provided portrait)
+  //  - Custom in-game live form (wraps drawPlayer entirely for him)
+  //  - Custom 'nadirOrbit' weapon branch (wraps firePlayerWeapon)
+  //  - Strict-unlock guard (same pattern as v78's Moots scrub)
+  //  - Document-capture click guard so prior wraps can't promote him
+  //  - startGame fallback to Rook if Nadir selected while locked
+  //
+  // Mobile pass piggybacks on the universal lock CSS from v78 + the
+  // existing responsive grid CSS from v66/v71.
+  // ===================================================================
+  (function installV81NadirDrownedSunUnlock() {
+    const V81_VERSION = 'qual.drowned-sun-nadir-final-passenger.2026-05-14.v81';
+    const CACHE81 = 'no-moon-drowned-sun-nadir-final-passenger-v81';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v81NadirDrownedSun && state.v81NadirDrownedSun.installed) return;
+
+    const NADIR_ID = 'nadir';
+    const DROWNED_SUN_BOSS_ID = 'drownedSun';
+    const SAVE81 = (typeof SAVE_KEY !== 'undefined' && SAVE_KEY) ? SAVE_KEY : 'noMoonSave_v1';
+    const MIRROR81 = 'noMoonProgress_v68';
+    const TAU81 = (typeof TAU !== 'undefined') ? TAU : Math.PI * 2;
+
+    const sys = state.v81NadirDrownedSun = {
+      installed: true,
+      version: V81_VERSION,
+      cacheExpected: CACHE81,
+      stats: {
+        cssInjected: 0,
+        nadirScrubsInSave: 0,
+        nadirScrubsInMirror: 0,
+        nadirAutoUnlocksFromSave: 0,
+        nadirClicksBlocked: 0,
+        nadirCardRedecorated: 0,
+        nadirCardRelocked: 0,
+        bossCardAppended: 0,
+        nadirShots: 0,
+        nadirDraws: 0,
+        lastError: null
+      }
+    };
+
+    const N = (v, f = 0) => { const x = Number(v); return Number.isFinite(x) ? x : f; };
+
+    function log81(e, where) {
+      const msg = (where || 'v81') + ': ' + (e && (e.message || String(e)) || 'unknown');
+      sys.stats.lastError = msg;
+      try { console.warn('[No Moon v81]', msg, e); } catch (_) {}
+    }
+    function tag81() { try { state.buildTag = V81_VERSION; } catch (_) {} }
+    function rgba81(hex, a) {
+      try { if (typeof rgba === 'function') return rgba(hex, a); } catch (_) {}
+      let h = String(hex || '#fff').replace('#', '');
+      if (h.length === 3) h = h.split('').map(c => c + c).join('');
+      const n = parseInt(h, 16);
+      if (!Number.isFinite(n)) return 'rgba(255,255,255,' + a + ')';
+      return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+
+    function readMirror81() {
+      try { const raw = localStorage.getItem(MIRROR81); return raw ? (JSON.parse(raw) || {}) : {}; } catch (_) { return {}; }
+    }
+    function writeMirror81(m) {
+      try { localStorage.setItem(MIRROR81, JSON.stringify(m)); return true; } catch (_) { return false; }
+    }
+
+    // -----------------------------------------------------------------
+    // Unlock-source check (true ONLY if Drowned Sun is defeated)
+    // -----------------------------------------------------------------
+    function isNadirStrictUnlocked81() {
+      try {
+        const s = state.save || {};
+        const sdb = s.defeatedBosses || {};
+        const sv = s.victories || {};
+        const m = readMirror81();
+        const mdb = m.defeatedBosses || {};
+        const mv = m.victories || {};
+        return !!(sdb.drownedSun) || N(sv.drownedSkyClears) > 0 || N(sv.drownedSunClears) > 0
+            || !!(mdb.drownedSun) || N(mv.drownedSkyClears) > 0 || N(mv.drownedSunClears) > 0;
+      } catch (_) { return false; }
+    }
+
+    function isDrownedSunCardRevealed81() {
+      // Same condition; lets the Field Guide stay in lock-step with character unlock.
+      return isNadirStrictUnlocked81();
+    }
+
+    // -----------------------------------------------------------------
+    // Scrub: if Nadir is in save.unlockedCharacters but not strictly
+    // unlocked, set false. Also auto-unlock once Drowned Sun is defeated.
+    // -----------------------------------------------------------------
+    function syncNadirSave81() {
+      try {
+        if (!state.save) return false;
+        const save = state.save;
+        save.unlockedCharacters = save.unlockedCharacters || {};
+        const strict = isNadirStrictUnlocked81();
+        let changed = false;
+        if (strict) {
+          if (!save.unlockedCharacters[NADIR_ID]) {
+            save.unlockedCharacters[NADIR_ID] = true;
+            save.careerAudit = save.careerAudit || {};
+            save.careerAudit.lastUnlock = 'Nadir';
+            save.careerAudit.lastUnlockReason = save.careerAudit.lastUnlockReason || 'drowned-sun-victory';
+            save.careerAudit.lastUnlockBuild = V81_VERSION;
+            sys.stats.nadirAutoUnlocksFromSave += 1;
+            changed = true;
+          }
+        } else {
+          if (save.unlockedCharacters[NADIR_ID]) {
+            save.unlockedCharacters[NADIR_ID] = false;
+            sys.stats.nadirScrubsInSave += 1;
+            changed = true;
+          }
+        }
+        // Mirror
+        try {
+          const m = readMirror81();
+          m.unlockedCharacters = m.unlockedCharacters || {};
+          if (strict) {
+            if (!m.unlockedCharacters[NADIR_ID]) {
+              m.unlockedCharacters[NADIR_ID] = true;
+              writeMirror81(m);
+            }
+          } else if (m.unlockedCharacters[NADIR_ID]) {
+            m.unlockedCharacters[NADIR_ID] = false;
+            writeMirror81(m);
+            sys.stats.nadirScrubsInMirror += 1;
+          }
+        } catch (_) {}
+        return changed;
+      } catch (e) { log81(e, 'syncNadirSave'); return false; }
+    }
+
+    // -----------------------------------------------------------------
+    // Nadir character registration
+    // -----------------------------------------------------------------
+    function installNadirCharacter81() {
+      try {
+        if (typeof CHARACTERS === 'undefined' || !Array.isArray(CHARACTERS)) return;
+        const visual = {
+          hullKind: 'lowStarDiver',
+          coreKind: 'blackSunFracture',
+          emitterKind: 'orbitStars',
+          passengerKind: 'nadirDiver',
+          body: 'nadir',
+          head: 'blackSun',
+          weapon: 'nadirOrbit',
+          shotCountVisual: 3,
+          accent2: '#f0c96a',
+          color: '#8fdcff',
+          icon: '⊙',
+          silhouette: 'gravity-slim',
+          liveName: 'Low-star orbit shell',
+          art: '../assets/no-moon/characters/nadir-portrait.webp'
+        };
+        let ch = CHARACTERS.find(function (c) { return c && c.id === NADIR_ID; });
+        if (!ch) { ch = { id: NADIR_ID }; CHARACTERS.push(ch); }
+        Object.assign(ch, {
+          id: NADIR_ID,
+          name: 'Nadir',
+          title: 'Low-Star Diver',
+          accent: '#8fdcff',
+          maxHp: 5,
+          speed: 252,
+          damage: 1.02,
+          fireDelay: 0.24,
+          weapon: 'nadirOrbit',
+          desc: 'Found below the Drowned Sun. Three low stars orbit him, bending bullets, pulling enemies, and making the dark answer back.',
+          tags: ['Unlockable', 'Gravity control', 'Orbit shots'],
+          unlockHint: 'Defeat the Drowned Sun.',
+          visual: visual,
+          visualV63: visual
+        });
+      } catch (e) { log81(e, 'installNadirCharacter'); }
+    }
+
+    // -----------------------------------------------------------------
+    // weaponLabel patch — base weaponLabel doesn't know 'nadirOrbit'.
+    // We wrap the function to add our label without editing the base.
+    // -----------------------------------------------------------------
+    if (typeof weaponLabel === 'function' && !weaponLabel.__v81Nadir) {
+      const baseWeaponLabel81 = weaponLabel;
+      weaponLabel = function weaponLabelV81(w) {
+        if (w === 'nadirOrbit' || w === 'orbit') return 'Low-star orbit';
+        return baseWeaponLabel81.apply(this, arguments);
+      };
+      weaponLabel.__v81Nadir = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Card decoration + lock guard
+    // -----------------------------------------------------------------
+    function decorateNadirCard81() {
+      try {
+        if (typeof characterGrid === 'undefined' || !characterGrid) return;
+        const card = characterGrid.querySelector('.card[data-char="' + NADIR_ID + '"]');
+        if (!card) return;
+        const unlocked = isNadirStrictUnlocked81();
+        card.classList.toggle('v81NadirLocked', !unlocked);
+        card.classList.toggle('v68Locked', !unlocked);
+        card.toggleAttribute('disabled', !unlocked);
+        card.setAttribute('aria-disabled', unlocked ? 'false' : 'true');
+        // Wipe any stale lock-badges from prior wraps and add our own
+        const stale = card.querySelectorAll('.v68LockBadge,.v68UnlockBadge,.v70UnlockBadge,.v71LockBadge,.v71UnlockBadge,.v81NadirBadge');
+        for (const el of stale) el.remove();
+        const badge = document.createElement('div');
+        badge.className = 'v81NadirBadge';
+        badge.textContent = unlocked ? 'Unlocked · low-star orbit' : 'Locked · defeat the Drowned Sun';
+        card.appendChild(badge);
+        sys.stats.nadirCardRedecorated += 1;
+        if (!unlocked) sys.stats.nadirCardRelocked += 1;
+      } catch (e) { log81(e, 'decorateNadirCard'); }
+    }
+
+    function injectCss81() {
+      try {
+        if (document.getElementById('v81-nadir-css')) return;
+        const st = document.createElement('style');
+        st.id = 'v81-nadir-css';
+        st.textContent = ''
+          // Locked Nadir card — applies on every overlay mode (same approach as v78 universal lock CSS).
+          + '.card.v81NadirLocked{opacity:.58!important;filter:saturate(.55) brightness(.72) contrast(.92)!important;cursor:not-allowed!important;}'
+          + '.card.v81NadirLocked:hover{transform:none!important;}'
+          + '.card.v81NadirLocked img{filter:grayscale(.30) brightness(.65)!important;}'
+          + '.v81NadirBadge{margin-top:10px;border-radius:999px;border:1px solid rgba(143,220,255,.30);background:rgba(3,8,24,.55);padding:6px 10px;font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:rgba(223,248,255,.78);text-align:center;}'
+          + '.card.v81NadirLocked .v81NadirBadge{border-color:rgba(143,220,255,.20);color:rgba(223,248,255,.62);}'
+          // Mobile: smaller padding, allow badge wrap
+          + '@media(max-width:720px){.v81NadirBadge{padding:5px 8px;font-size:9.5px;letter-spacing:.10em;line-height:1.18;}}'
+          // Field-guide Drowned Sun card (uses .v71BossCard styling); just ensure mobile readability
+          + '@media(max-width:460px){#codexOverlay .v71BossCard[data-v81-boss="drownedSun"] img{height:170px;}}';
+        document.head.appendChild(st);
+        sys.stats.cssInjected += 1;
+      } catch (e) { log81(e, 'injectCss'); }
+    }
+
+    // Document-capture click guard: runs before prior wraps' handlers.
+    function v81NadirClickGuard(ev) {
+      try {
+        const t = ev.target;
+        if (!t || !t.closest) return;
+        const card = t.closest('.card[data-char="' + NADIR_ID + '"]');
+        if (!card) return;
+        if (isNadirStrictUnlocked81()) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+        sys.stats.nadirClicksBlocked += 1;
+        try { if (typeof pushMessage === 'function') pushMessage('Defeat the Drowned Sun to wake Nadir.', '#8fdcff', 16, 1.2, 0.18); } catch (_) {}
+        try { decorateNadirCard81(); } catch (_) {}
+      } catch (e) { log81(e, 'clickGuard'); }
+    }
+    try {
+      document.addEventListener('pointerdown', v81NadirClickGuard, true);
+      document.addEventListener('click', v81NadirClickGuard, true);
+    } catch (e) { log81(e, 'bindClickGuard'); }
+
+    // -----------------------------------------------------------------
+    // renderCharacterCards wrap — install + decorate
+    // -----------------------------------------------------------------
+    if (typeof renderCharacterCards === 'function' && !renderCharacterCards.__v81Nadir) {
+      const baseRenderCards81 = renderCharacterCards;
+      renderCharacterCards = function renderCharacterCardsV81() {
+        try { installNadirCharacter81(); } catch (_) {}
+        try { syncNadirSave81(); } catch (_) {}
+        const out = baseRenderCards81.apply(this, arguments);
+        try { injectCss81(); decorateNadirCard81(); } catch (e) { log81(e, 'renderCards post'); }
+        return out;
+      };
+      renderCharacterCards.__v81Nadir = true;
+    }
+    if (typeof updateOverlay === 'function' && !updateOverlay.__v81Nadir) {
+      const baseUpdateOverlay81 = updateOverlay;
+      updateOverlay = function updateOverlayV81() {
+        const out = baseUpdateOverlay81.apply(this, arguments);
+        try { syncNadirSave81(); decorateNadirCard81(); } catch (_) {}
+        return out;
+      };
+      updateOverlay.__v81Nadir = true;
+    }
+
+    // -----------------------------------------------------------------
+    // safeWriteSave PRE-hook — auto-promote Nadir when Drowned Sun
+    // becomes true (catches v80 Cold Lantern touch). Also runs the scrub.
+    // -----------------------------------------------------------------
+    if (typeof safeWriteSave === 'function' && !safeWriteSave.__v81Nadir) {
+      const baseSafeWrite81 = safeWriteSave;
+      safeWriteSave = function safeWriteSaveV81() {
+        try { syncNadirSave81(); } catch (e) { log81(e, 'preSafeWrite'); }
+        return baseSafeWrite81.apply(this, arguments);
+      };
+      safeWriteSave.__v81Nadir = true;
+    }
+
+    // -----------------------------------------------------------------
+    // startGame guard — fall back to Rook if Nadir is selected but locked
+    // -----------------------------------------------------------------
+    if (typeof startGame === 'function' && !startGame.__v81Nadir) {
+      const baseStartGame81 = startGame;
+      startGame = function startGameV81(charId) {
+        try {
+          installNadirCharacter81();
+          syncNadirSave81();
+          if (charId === NADIR_ID && !isNadirStrictUnlocked81()) {
+            charId = 'rook';
+            state.selectedCharId = 'rook';
+            if (state.save) state.save.selectedCharId = 'rook';
+          }
+        } catch (e) { log81(e, 'startGame pre'); }
+        const out = baseStartGame81.apply(this, [charId]);
+        try {
+          if (state.player && state.player.template && state.player.template.id === NADIR_ID) {
+            initNadirRuntime81(state.player);
+          }
+        } catch (e) { log81(e, 'startGame post'); }
+        return out;
+      };
+      startGame.__v81Nadir = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Drowned Sun boss-card append (Field Guide)
+    //   v71's BOSS_CARDS71 is closure-local; we DOM-append a 7th card
+    //   and rewrite the count text after every v71 render.
+    // -----------------------------------------------------------------
+    function appendDrownedSunBossCard81() {
+      try {
+        if (typeof codexOverlay === 'undefined' || !codexOverlay) return;
+        const panel = codexOverlay.querySelector('.codexPanel');
+        if (!panel) return;
+        const deck = panel.querySelector('.v71BossDeck');
+        if (!deck) return;
+        const grid = deck.querySelector('.v71BossGrid');
+        const countEl = deck.querySelector('.v71BossDeckCount');
+        if (!grid) return;
+        // Remove any prior append (re-render safety)
+        const stale = grid.querySelectorAll('[data-v81-boss="drownedSun"]');
+        for (const el of stale) el.remove();
+        const revealed = isDrownedSunCardRevealed81();
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.v81Boss = 'drownedSun';
+        btn.className = revealed ? 'v71BossCard revealed' : 'v71BossCard locked';
+        btn.setAttribute('aria-label', revealed ? 'Drowned Sun defeated' : 'Sealed defeated-boss card');
+        btn.innerHTML = revealed
+          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
+          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
+        grid.appendChild(btn);
+        // Update count text: parse "X/6 revealed", bump denominator to 7,
+        // and increment numerator if the Drowned Sun is revealed.
+        if (countEl) {
+          const txt = String(countEl.textContent || '');
+          const m = txt.match(/(\d+)\s*\/\s*(\d+)\s+revealed/i);
+          if (m) {
+            let num = N(m[1]);
+            const den = N(m[2]) + 1;
+            if (revealed) num += 1;
+            countEl.textContent = num + '/' + den + ' revealed';
+          }
+        }
+        sys.stats.bossCardAppended += 1;
+      } catch (e) { log81(e, 'appendBossCard'); }
+    }
+    if (typeof openCodex === 'function' && !openCodex.__v81DrownedSunCard) {
+      const baseOpenCodex81 = openCodex;
+      openCodex = function openCodexV81() {
+        const out = baseOpenCodex81.apply(this, arguments);
+        try { appendDrownedSunBossCard81(); } catch (e) { log81(e, 'openCodex post'); }
+        return out;
+      };
+      openCodex.__v81DrownedSunCard = true;
+    }
+    if (typeof renderCodexStats === 'function' && !renderCodexStats.__v81DrownedSunCard) {
+      const baseRenderCodex81 = renderCodexStats;
+      renderCodexStats = function renderCodexStatsV81() {
+        const out = baseRenderCodex81.apply(this, arguments);
+        try { appendDrownedSunBossCard81(); } catch (e) { log81(e, 'renderCodexStats post'); }
+        return out;
+      };
+      renderCodexStats.__v81DrownedSunCard = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Nadir runtime: three orbit "stars" that fire and cool down
+    // -----------------------------------------------------------------
+    function initNadirRuntime81(p) {
+      try {
+        if (!p || !p.template || p.template.id !== NADIR_ID) return;
+        if (!p._nadirStars) {
+          p._nadirStars = [
+            { ready: true, cd: 0, angle: 0 },
+            { ready: true, cd: 0, angle: TAU81 / 3 },
+            { ready: true, cd: 0, angle: TAU81 * 2 / 3 }
+          ];
+        }
+      } catch (e) { log81(e, 'initNadirRuntime'); }
+    }
+
+    // -----------------------------------------------------------------
+    // Nadir live in-game form — wrap drawPlayer entirely for him
+    // -----------------------------------------------------------------
+    function drawNadirLive81(p) {
+      try {
+        const r = p.r || 17;
+        const t = N(state.time);
+        const aim = N(p.aimAngle);
+        const accent = '#8fdcff';
+        const gold = '#f0c96a';
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        // Shadow under
+        ctx.fillStyle = 'rgba(0,0,0,0.42)';
+        ctx.beginPath();
+        ctx.ellipse(-r * 0.16, r * 0.86, r * 1.18, r * 0.46, 0, 0, TAU81);
+        ctx.fill();
+        // Gravity glow
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const glow = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r * 2.6);
+        glow.addColorStop(0, rgba81(accent, 0.32));
+        glow.addColorStop(0.5, rgba81(accent, 0.10));
+        glow.addColorStop(1, rgba81('#000000', 0));
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(0, 0, r * 2.6, 0, TAU81); ctx.fill();
+        ctx.restore();
+        // Cloak (aim-aligned triangle/bezier)
+        ctx.save();
+        ctx.rotate(aim);
+        ctx.fillStyle = 'rgba(2,5,14,0.96)';
+        ctx.beginPath();
+        ctx.moveTo(r * 0.18, -r * 0.86);
+        ctx.bezierCurveTo(-r * 0.78, -r * 1.12, -r * 1.62, -r * 0.42, -r * 1.38, r * 0.52);
+        ctx.bezierCurveTo(-r * 0.92, r * 1.28, r * 0.02, r * 1.42, r * 0.72, r * 0.62);
+        ctx.bezierCurveTo(r * 0.98, r * 0.12, r * 0.86, -r * 0.56, r * 0.18, -r * 0.86);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = rgba81(accent, 0.46);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+        // Black sun head/core
+        ctx.fillStyle = '#020308';
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.56, 0, TAU81); ctx.fill();
+        ctx.strokeStyle = rgba81(accent, 0.42);
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.58, 0, TAU81); ctx.stroke();
+        // Drowned-gold fracture
+        ctx.strokeStyle = rgba81(gold, 0.86);
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.18, -r * 0.36);
+        ctx.lineTo(r * 0.02, -r * 0.08);
+        ctx.lineTo(-r * 0.08, r * 0.18);
+        ctx.lineTo(r * 0.28, r * 0.40);
+        ctx.stroke();
+        // Orbit rings (independent of aim — keep readable)
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.strokeStyle = rgba81(accent, 0.20);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.55, r * 0.76, t * 0.22, 0, TAU81);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.26, r * 0.58, -t * 0.18, 0, TAU81);
+        ctx.stroke();
+        // Three orbiting stars (ready: bright, spent: dim)
+        const stars = Array.isArray(p._nadirStars) ? p._nadirStars : null;
+        for (let i = 0; i < 3; i++) {
+          const a = t * 1.35 + i * TAU81 / 3;
+          const ox = Math.cos(a) * r * 1.28;
+          const oy = Math.sin(a) * r * 0.72;
+          const ready = !stars || (stars[i] && stars[i].ready);
+          const alpha = ready ? 0.92 : 0.30;
+          // Star halo
+          ctx.fillStyle = rgba81(accent, 0.20 * alpha);
+          ctx.beginPath(); ctx.arc(ox, oy, r * 0.40, 0, TAU81); ctx.fill();
+          // Star core
+          ctx.fillStyle = '#06101d';
+          ctx.beginPath(); ctx.arc(ox, oy, r * 0.15, 0, TAU81); ctx.fill();
+          ctx.strokeStyle = rgba81('#e9fbff', alpha);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(ox, oy, r * 0.17, 0, TAU81); ctx.stroke();
+        }
+        ctx.restore();
+        // Front aim glint
+        const ax = Math.cos(aim) * r * 0.72;
+        const ay = Math.sin(aim) * r * 0.72;
+        ctx.fillStyle = rgba81(gold, 0.82);
+        ctx.beginPath(); ctx.arc(ax, ay, r * 0.10, 0, TAU81); ctx.fill();
+        ctx.restore();
+        sys.stats.nadirDraws += 1;
+      } catch (e) { log81(e, 'drawNadirLive'); }
+    }
+
+    if (typeof drawPlayer === 'function' && !drawPlayer.__v81NadirLive) {
+      const baseDrawPlayer81 = drawPlayer;
+      drawPlayer = function drawPlayerV81(player) {
+        try {
+          if (player && player.template && player.template.id === NADIR_ID) {
+            drawNadirLive81(player);
+            return;
+          }
+        } catch (e) { log81(e, 'drawPlayer hook'); }
+        return baseDrawPlayer81.apply(this, arguments);
+      };
+      drawPlayer.__v81NadirLive = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Low-Star Orbit weapon — three bullets in a tight forward fan
+    // -----------------------------------------------------------------
+    function fireNadirOrbit81(player, ax, ay, context) {
+      try {
+        context = context || {};
+        initNadirRuntime81(player);
+        const stars = player._nadirStars || [];
+        const damageScale = context.damageScale == null ? 1 : context.damageScale;
+        const color = context.color || '#8fdcff';
+        // Find ready stars; fire up to 3.
+        const readyIdx = [];
+        for (let i = 0; i < stars.length; i++) if (stars[i] && stars[i].ready) readyIdx.push(i);
+        const angle = Math.atan2(ay, ax);
+        if (readyIdx.length === 0) {
+          // Fallback weak shot so fire never feels dead
+          if (typeof createPlayerBullet === 'function') {
+            createPlayerBullet({
+              x: player.x + ax * 16,
+              y: player.y + ay * 16,
+              vx: ax * 640,
+              vy: ay * 640,
+              r: 2.8,
+              life: 0.42,
+              damage: 0.30 * (player.damage || 1) * damageScale,
+              color: color
+            }, { gen: context.gen || 0, source: 'nadirFallback' });
+          }
+          return;
+        }
+        // Fire star bullets — one bullet per ready star, slightly angle-spread
+        for (let k = 0; k < readyIdx.length; k++) {
+          const i = readyIdx[k];
+          const spread = (k - (readyIdx.length - 1) * 0.5) * 0.12;
+          const a = angle + spread;
+          if (typeof createPlayerBullet === 'function') {
+            createPlayerBullet({
+              x: player.x + Math.cos(a) * 18,
+              y: player.y + Math.sin(a) * 18,
+              vx: Math.cos(a) * 760,
+              vy: Math.sin(a) * 760,
+              r: 5.0,
+              life: 0.92,
+              damage: 0.78 * (player.damage || 1) * damageScale,
+              color: color,
+              pierce: 1
+            }, { gen: context.gen || 0, source: 'nadirOrbit' });
+          }
+          stars[i].ready = false;
+          stars[i].cd = 0.72;
+        }
+        try {
+          if (typeof spawnSpark === 'function') spawnSpark(player.x + ax * 14, player.y + ay * 14, '#f0c96a', 3, 80);
+        } catch (_) {}
+        sys.stats.nadirShots += 1;
+      } catch (e) { log81(e, 'fireNadirOrbit'); }
+    }
+
+    if (typeof firePlayerWeapon === 'function' && !firePlayerWeapon.__v81NadirWeapon) {
+      const baseFirePlayerWeapon81 = firePlayerWeapon;
+      firePlayerWeapon = function firePlayerWeaponV81(player, ax, ay, context) {
+        try {
+          if (player && player.template && (player.template.id === NADIR_ID || player.template.weapon === 'nadirOrbit' || player.template.weapon === 'orbit')) {
+            fireNadirOrbit81(player, ax, ay, context || {});
+            // Run module addons & echo volley like base does for other weapons
+            try {
+              const angle = Math.atan2(ay, ax);
+              const damageScale = (context && context.damageScale != null) ? context.damageScale : 1;
+              if (context && context.skipAddons) {} else if (typeof fireModuleAddons === 'function') fireModuleAddons(player, angle, ax, ay, damageScale);
+              if (context && context.skipEcho) {} else if (typeof scheduleEchoVolley === 'function') scheduleEchoVolley(player, ax, ay, damageScale);
+            } catch (_) {}
+            return;
+          }
+        } catch (e) { log81(e, 'firePlayerWeapon hook'); }
+        return baseFirePlayerWeapon81.apply(this, arguments);
+      };
+      firePlayerWeapon.__v81NadirWeapon = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Update Nadir star cooldowns per frame
+    // -----------------------------------------------------------------
+    if (typeof updateGame === 'function' && !updateGame.__v81NadirStars) {
+      const baseUpdateGame81 = updateGame;
+      updateGame = function updateGameV81(dt) {
+        const out = baseUpdateGame81.apply(this, arguments);
+        try {
+          const d = Math.min(0.08, Math.max(0, N(dt)));
+          if (d > 0 && state.player && state.player.template && state.player.template.id === NADIR_ID) {
+            const stars = state.player._nadirStars;
+            if (Array.isArray(stars)) {
+              for (const s of stars) {
+                if (!s.ready) {
+                  s.cd -= d;
+                  if (s.cd <= 0) {
+                    s.ready = true;
+                    s.cd = 0;
+                    try { if (typeof spawnSpark === 'function') spawnSpark(state.player.x, state.player.y, '#8fdcff', 2, 60); } catch (_) {}
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) { log81(e, 'updateGame stars'); }
+        return out;
+      };
+      updateGame.__v81NadirStars = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Hook killEnemy: when v80DrownedSun (or v79DrownedSun) dies, also
+    // mark Nadir unlocked + Drowned Sun boss-card revealed immediately.
+    // (Belt-and-suspenders: safeWriteSave PRE-hook also handles this.)
+    // -----------------------------------------------------------------
+    if (typeof killEnemy === 'function' && !killEnemy.__v81NadirUnlock) {
+      const baseKill81 = killEnemy;
+      killEnemy = function killEnemyV81(enemy) {
+        const isDrownedSunBoss = enemy && !enemy.remove && (enemy.typeId === 'v80DrownedSun' || enemy.typeId === 'v79DrownedSun');
+        const out = baseKill81.apply(this, arguments);
+        if (isDrownedSunBoss) {
+          try {
+            if (state.save) {
+              state.save.defeatedBosses = state.save.defeatedBosses || {};
+              state.save.defeatedBosses.drownedSun = true;
+              state.save.unlockedCharacters = state.save.unlockedCharacters || {};
+              state.save.unlockedCharacters[NADIR_ID] = true;
+              state.save.victories = state.save.victories || {};
+              state.save.victories.drownedSunClears = Math.max(1, N(state.save.victories.drownedSunClears));
+              state.save.careerAudit = state.save.careerAudit || {};
+              state.save.careerAudit.lastBossDefeated = 'drownedSun';
+              state.save.careerAudit.lastUnlock = 'Nadir';
+              state.save.careerAudit.lastUnlockReason = 'drowned-sun-killed';
+              state.save.careerAudit.lastUnlockBuild = V81_VERSION;
+            }
+            try {
+              const m = readMirror81();
+              m.defeatedBosses = m.defeatedBosses || {};
+              m.defeatedBosses.drownedSun = true;
+              m.unlockedCharacters = m.unlockedCharacters || {};
+              m.unlockedCharacters[NADIR_ID] = true;
+              m.victories = m.victories || {};
+              m.victories.drownedSunClears = Math.max(1, N(m.victories.drownedSunClears));
+              writeMirror81(m);
+            } catch (_) {}
+            try { if (typeof pushMessage === 'function') pushMessage('NADIR SURFACES', '#8fdcff', 22, 2.6, 0.22); } catch (_) {}
+            try { if (typeof renderCharacterCards === 'function') renderCharacterCards(); } catch (_) {}
+            try { if (typeof renderCodexStats === 'function') renderCodexStats(); } catch (_) {}
+          } catch (e) { log81(e, 'killEnemy drowned sun'); }
+        }
+        return out;
+      };
+      killEnemy.__v81NadirUnlock = true;
+    }
+
+    // -----------------------------------------------------------------
+    // Debug helpers
+    // -----------------------------------------------------------------
+    state.v81Debug = function v81Debug() {
+      try {
+        const save = state.save || {};
+        const mirror = readMirror81();
+        return {
+          version: V81_VERSION,
+          buildTag: state.buildTag,
+          cacheExpected: CACHE81,
+          nadirInstalled: !!(typeof CHARACTERS !== 'undefined' && CHARACTERS.find(function (c) { return c && c.id === NADIR_ID; })),
+          nadirStrictUnlocked: isNadirStrictUnlocked81(),
+          nadirInSave: !!(save.unlockedCharacters && save.unlockedCharacters[NADIR_ID]),
+          nadirInMirror: !!(mirror.unlockedCharacters && mirror.unlockedCharacters[NADIR_ID]),
+          drownedSunInSave: !!(save.defeatedBosses && save.defeatedBosses.drownedSun),
+          drownedSunInMirror: !!(mirror.defeatedBosses && mirror.defeatedBosses.drownedSun),
+          drownedSkyClears: N(save.victories && save.victories.drownedSkyClears),
+          drownedSunClears: N(save.victories && save.victories.drownedSunClears),
+          selectedCharId: state.selectedCharId,
+          playerTemplate: state.player && state.player.template && state.player.template.id,
+          nadirStars: state.player && state.player._nadirStars && state.player._nadirStars.map(function (s) { return { ready: !!s.ready, cd: N(s.cd) }; }),
+          stats: Object.assign({}, sys.stats),
+          v80: typeof state.v80Debug === 'function' ? state.v80Debug() : null
+        };
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+    state.v81UnlockNadir = function () {
+      try {
+        if (state.save) {
+          state.save.defeatedBosses = state.save.defeatedBosses || {};
+          state.save.defeatedBosses.drownedSun = true;
+          state.save.unlockedCharacters = state.save.unlockedCharacters || {};
+          state.save.unlockedCharacters[NADIR_ID] = true;
+          state.save.victories = state.save.victories || {};
+          state.save.victories.drownedSunClears = Math.max(1, N(state.save.victories.drownedSunClears));
+        }
+        try {
+          const m = readMirror81();
+          m.defeatedBosses = m.defeatedBosses || {};
+          m.defeatedBosses.drownedSun = true;
+          m.unlockedCharacters = m.unlockedCharacters || {};
+          m.unlockedCharacters[NADIR_ID] = true;
+          m.victories = m.victories || {};
+          m.victories.drownedSunClears = Math.max(1, N(m.victories.drownedSunClears));
+          writeMirror81(m);
+        } catch (_) {}
+        try { if (typeof safeWriteSave === 'function') safeWriteSave(); } catch (_) {}
+        try { if (typeof renderCharacterCards === 'function') renderCharacterCards(); } catch (_) {}
+        try { if (typeof renderCodexStats === 'function') renderCodexStats(); } catch (_) {}
+        return state.v81Debug();
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+    state.v81LockNadir = function () {
+      try {
+        if (state.save) {
+          state.save.defeatedBosses = state.save.defeatedBosses || {};
+          state.save.defeatedBosses.drownedSun = false;
+          state.save.unlockedCharacters = state.save.unlockedCharacters || {};
+          state.save.unlockedCharacters[NADIR_ID] = false;
+          state.save.victories = state.save.victories || {};
+          state.save.victories.drownedSunClears = 0;
+          state.save.victories.drownedSkyClears = 0;
+        }
+        try {
+          const m = readMirror81();
+          m.defeatedBosses = m.defeatedBosses || {};
+          m.defeatedBosses.drownedSun = false;
+          m.unlockedCharacters = m.unlockedCharacters || {};
+          m.unlockedCharacters[NADIR_ID] = false;
+          m.victories = m.victories || {};
+          m.victories.drownedSunClears = 0;
+          m.victories.drownedSkyClears = 0;
+          writeMirror81(m);
+        } catch (_) {}
+        if (state.selectedCharId === NADIR_ID) state.selectedCharId = 'rook';
+        try { if (typeof safeWriteSave === 'function') safeWriteSave(); } catch (_) {}
+        try { if (typeof renderCharacterCards === 'function') renderCharacterCards(); } catch (_) {}
+        try { if (typeof renderCodexStats === 'function') renderCodexStats(); } catch (_) {}
+        return state.v81Debug();
+      } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    };
+
+    // -----------------------------------------------------------------
+    // Install
+    // -----------------------------------------------------------------
+    try {
+      installNadirCharacter81();
+      injectCss81();
+      syncNadirSave81();
+      tag81();
+      setTimeout(tag81, 0);
+      setTimeout(tag81, 350);
+      setTimeout(tag81, 1400);
+      if (typeof renderCharacterCards === 'function') {
+        try { renderCharacterCards(); } catch (_) {}
+      }
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V81_NADIR_DROWNED_SUN__ = sys;
+        window.noMoonV81Debug = function () { return state.v81Debug(); };
+        window.noMoonV81UnlockNadir = function () { return state.v81UnlockNadir(); };
+        window.noMoonV81LockNadir = function () { return state.v81LockNadir(); };
+      }
+    } catch (e) { log81(e, 'install'); }
+    state.buildTag = V81_VERSION;
+  })();
+
+
   renderCodexStats();
 
 })();

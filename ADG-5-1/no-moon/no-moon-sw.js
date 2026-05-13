@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-drowned-sky-stage-eclipse-trophy-v80';
+const CACHE_NAME = 'no-moon-drowned-sun-nadir-final-passenger-v81';
 const ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const ASSETS = [
   '../assets/no-moon/characters/mire-portrait.webp',
   '../assets/no-moon/characters/moots-portrait.webp',
   '../assets/no-moon/characters/vesper-portrait.webp',
+  '../assets/no-moon/characters/nadir-portrait.webp',
   '../assets/no-moon/title/no-moon-title-desktop.webp',
   '../assets/no-moon/title/no-moon-title-mobile.webp',
   '../assets/no-moon/title/no-moon-title-poster.webp',
@@ -17,7 +18,8 @@ const ASSETS = [
   '../assets/no-moon/bosses/night-ferry-card.webp',
   '../assets/no-moon/bosses/archon-card.webp',
   '../assets/no-moon/bosses/spiggot-card.webp',
-  '../assets/no-moon/bosses/sun-card.webp'
+  '../assets/no-moon/bosses/sun-card.webp',
+  '../assets/no-moon/bosses/drowned-sun-card.webp'
 ];
 
 self.addEventListener('install', (event) => {
