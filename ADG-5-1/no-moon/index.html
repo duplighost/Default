@@ -51458,7 +51458,15 @@ function drawHudBossMiniStats(p, layout) {
         const style = styleFor93(enemy.captain);
         const t = N93(state.time, 0);
         const color = enemy.captain.color || enemy.color || '#f4f7ff';
-        const r = N93(enemy.r, 14);
+        // Apply per-captain sizeBoost as a visual scalar so e.g. the
+        // Doorbreaker reads as bigger and more imposing than Perched
+        // Witness. Do NOT scale enemy.r itself (collision unchanged).
+        const scale = N93(style.sizeBoost, 1);
+        const r = N93(enemy.r, 14) * scale;
+        // Use the real enemy.maxHp when the engine provides it (set at
+        // createEnemy time from the template). Fall back to first-seen
+        // hp only if a captain somehow lacks .maxHp.
+        const maxHp = N93(enemy.maxHp, cs.maxHp);
 
         ctx.save();
 
@@ -51513,7 +51521,7 @@ function drawHudBossMiniStats(p, layout) {
         }
 
         // Health bar above title.
-        if (cs.maxHp > 0 && N93(enemy.hp, cs.maxHp) < cs.maxHp) {
+        if (maxHp > 0 && N93(enemy.hp, maxHp) < maxHp) {
           const barW = r * 2.6;
           const barH = 3;
           const bx = enemy.x - barW / 2;
@@ -51521,7 +51529,7 @@ function drawHudBossMiniStats(p, layout) {
           ctx.globalCompositeOperation = 'source-over';
           ctx.fillStyle = 'rgba(0,0,0,0.55)';
           ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
-          const pct = Math.max(0, Math.min(1, N93(enemy.hp, cs.maxHp) / cs.maxHp));
+          const pct = Math.max(0, Math.min(1, N93(enemy.hp, maxHp) / maxHp));
           ctx.fillStyle = rgba93(color, 0.92);
           ctx.fillRect(bx, by, barW * pct, barH);
         }
@@ -51588,22 +51596,33 @@ function drawHudBossMiniStats(p, layout) {
         // just means "more splinters" — fall through.
         if (style.special !== 'splinter') {
           const a = rand93(0, Math.PI * 2);
+          let finalType = style.special;
+          let finalItemId = null;
+          // Module pickups MUST carry a valid itemId. If chooseBonusItem
+          // isn't available or returns nothing the player can apply,
+          // downgrade to a repair so we never spawn a dead module.
+          if (style.special === 'module') {
+            if (typeof chooseBonusItem === 'function' && typeof ITEM_BY_ID !== 'undefined' && ITEM_BY_ID) {
+              try {
+                const id = chooseBonusItem();
+                if (id && ITEM_BY_ID[id]) finalItemId = id;
+              } catch (_) {}
+            }
+            if (!finalItemId) finalType = 'repair';
+          }
           const drop = {
-            type: style.special,
+            type: finalType,
             x: cx + Math.cos(a) * 18,
             y: cy + Math.sin(a) * 18,
             vx: 0,
             vy: 0,
-            r: style.special === 'repair' ? 10 : 12,
+            r: finalType === 'repair' ? 10 : 12,
             age: 0,
             bob: rand93(0, Math.PI * 2),
             remove: false,
             _v93Captain: true
           };
-          // Module pickups must carry an itemId to apply on collect.
-          if (style.special === 'module' && typeof chooseBonusItem === 'function') {
-            try { drop.itemId = chooseBonusItem(); } catch (_) {}
-          }
+          if (finalItemId) drop.itemId = finalItemId;
           pushPickup93(room, drop);
           sys.stats.captainSpecialDrops += 1;
         }
@@ -52062,8 +52081,8 @@ function drawHudBossMiniStats(p, layout) {
   // drawAmbientWorld / drawEnemy / killEnemy POST-base wraps.
   // ===================================================================
   (function installV94DrownedSkyExpansion() {
-    const V94_VERSION = 'qual.drowned-sky-expansion.2026-05-14.v94';
-    const CACHE94 = 'no-moon-drowned-sky-expansion-v94';
+    const V94_VERSION = 'qual.drowned-sky-expansion.2026-05-14.v94.1';
+    const CACHE94 = 'no-moon-drowned-sky-expansion-v94-1';
     if (typeof state === 'undefined' || !state) return;
     if (state.v94DrownedSkyExpansion && state.v94DrownedSkyExpansion.installed) return;
 
@@ -52476,23 +52495,35 @@ function drawHudBossMiniStats(p, layout) {
     function ensureCacheContents94(room) {
       try {
         if (!room || !room._v94CacheShrine || room._v94CacheReady) return;
-        // Drop one module pickup at center. Modules must carry an
-        // itemId or grantItem ignores them on pickup.
+        // Drop one module pickup at center. Modules MUST carry a valid
+        // itemId — without one, base pickup-collect resolves the effect
+        // via ITEM_BY_ID[itemId] and silently no-ops. If we can't get a
+        // good id from chooseBonusItem we downgrade to a repair so the
+        // player still gets a reward.
         room.pickups = room.pickups || [];
+        let finalType = 'module';
+        let finalItemId = null;
+        if (typeof chooseBonusItem === 'function' && typeof ITEM_BY_ID !== 'undefined' && ITEM_BY_ID) {
+          try {
+            const id = chooseBonusItem();
+            if (id && ITEM_BY_ID[id]) finalItemId = id;
+          } catch (_) {}
+        }
+        if (!finalItemId) finalType = 'repair';
         const moduleDrop = {
-          type: 'module',
+          type: finalType,
           x: N94(room.width, 1240) * 0.5,
           y: N94(room.height, 900) * 0.5,
-          vx: 0, vy: 0, r: 12,
+          vx: 0, vy: 0, r: finalType === 'repair' ? 10 : 12,
           age: 0,
           bob: rand94(0, Math.PI * 2),
           remove: false,
           _v94CacheReward: true
         };
-        if (typeof chooseBonusItem === 'function') {
-          try { moduleDrop.itemId = chooseBonusItem(); } catch (_) {}
-        }
+        if (finalItemId) moduleDrop.itemId = finalItemId;
         room.pickups.push(moduleDrop);
+        room._v94CacheRewardType = finalType;
+        room._v94CacheRewardItemId = finalItemId || null;
         sys.stats.cacheRewardsDropped += 1;
         // Spawn 2 Drift Lanterns flanking the reward. Initialize the
         // _v94 state eagerly so the first frame of draw doesn't fall
@@ -52829,6 +52860,20 @@ function drawHudBossMiniStats(p, layout) {
         const second = pickCacheSide94(state.level);
         return { ok: first === second, first: first, second: second };
       });
+      run('cacheRewardIntegrity', function () {
+        // The cache reward must be applicable on pickup. If it's a
+        // module, it must have a valid itemId in ITEM_BY_ID. If it's
+        // a repair (fallback), it's always applicable. Anything else
+        // is a bug.
+        if (!state.level || !Array.isArray(state.level.rooms)) return { ok: true, skipped: 'no-level' };
+        const cacheRoom = state.level.rooms.find(function (r) { return r && r._v94CacheShrine && r._v94CacheReady; });
+        if (!cacheRoom) return { ok: true, skipped: 'no-cache-room-ready' };
+        const t = cacheRoom._v94CacheRewardType;
+        const id = cacheRoom._v94CacheRewardItemId;
+        const moduleOK = (t === 'module' && id && typeof ITEM_BY_ID !== 'undefined' && ITEM_BY_ID && !!ITEM_BY_ID[id]);
+        const repairOK = (t === 'repair');
+        return { ok: moduleOK || repairOK, type: t, itemId: id, moduleOK: moduleOK, repairOK: repairOK };
+      });
       out.ok = Object.keys(out).filter(function (k) { return k !== 'version' && k !== 'ok'; }).every(function (k) { return out[k] && out[k].ok !== false; });
       tag94();
       return out;
@@ -52854,3 +52899,5 @@ function drawHudBossMiniStats(p, layout) {
 
 })();
 </script>
+</body>
+</html>

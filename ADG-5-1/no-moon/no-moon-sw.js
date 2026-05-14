@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-drowned-sky-expansion-v94';
+const CACHE_NAME = 'no-moon-drowned-sky-expansion-v94-1';
 const ASSETS = [
   './',
   './index.html',
