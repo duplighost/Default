@@ -55668,7 +55668,7 @@ function drawHudBossMiniStats(p, layout) {
         try { out[name] = fn(); }
         catch (e) { out[name] = { ok: false, error: String((e && (e.message || e))) }; }
       }
-      run('installed', () => ({ ok: !!state.__nmV210Installed }));
+      run('installed', () => ({ ok: !!state.__nmV216Installed }));
       run('wraps', () => {
         const need = ['updateGame','syncActiveRoom','generateLevel','startGame','populateRoomEnemies','setRoomCleared','killEnemy','damageEnemy','damagePlayer','collapseBossAdds','tryDoorTransition','pushPickup','updatePickups','drawAmbientWorld','renderWorld'];
         const missing = need.filter(k => !NM.wraps[k]);
