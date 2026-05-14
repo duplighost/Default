@@ -13,23 +13,23 @@ Every time I finish a build pass, I'll put a complete drop-in website zip at:
 The current one is:
 
 ```
-/releases/no-moon-v93-website.zip   (~3.6 MB)
+/releases/no-moon-v94-website.zip   (~3.6 MB)
 ```
 
-Older releases (v76 through v92) stay in the same folder if you ever need to roll back. **Pro's v86 / v87 / v88 are skipped on purpose** — they shipped a hot DOM-mutation loop in the Codex repair that froze the page. v89 was the recovery build (Pro's v85 + version bump). Pro then built v90 → v91 → v92 forward from v89, properly avoiding the loop pattern. v93 is mine on top of Pro's v92 — adds the Captain Fang upgrade (mini-boss visuals + telegraphed entry + themed rewards + adjacent-room ghost cameo) and the Sun finale polish (first-clear crater reveal + re-run sigil hierarchy). v93 does not install any MutationObserver and does not touch the Codex DOM — the v92 codex layer stays canonical.
+Older releases (v76 through v93) stay in the same folder if you ever need to roll back. **Pro's v86 / v87 / v88 are skipped on purpose** — codex DOM-mutation loop. v89 was the recovery build (Pro's v85 + version bump). Pro then built v90 → v91 → v92 on v89. v93 is mine on top of Pro's v92 — Captain Fang upgrade (mini-boss visuals + telegraphed entry + themed rewards + adjacent-room ghost cameo) + Sun finale polish (first-clear crater reveal + re-run sigil hierarchy). v94 is mine on top of v93 — Drowned Sky Expansion: the signature **Tidefall** environmental hazard (cold-blue beams sweep down the room and you slide sideways between them), a new **Drift Lantern** enemy that detonates if you ignore it, a **Submerged Reliquary** cache shrine in one fork side with a guaranteed module + two lanterns guarding it, and ambient layer (falling stars + broken submerged pillars). Neither v93 nor v94 installs a MutationObserver or touches the Codex DOM — v92's codex layer is still canonical.
 
 Direct raw URL (this is the one that downloaded easily for you):
 
 ```
-https://github.com/duplighost/Default/raw/claude/investigate-code-functionality-gP8aM/releases/no-moon-v93-website.zip
+https://github.com/duplighost/Default/raw/claude/investigate-code-functionality-gP8aM/releases/no-moon-v94-website.zip
 ```
 
-That zip has the **entire website folder structure** inside, ready to unzip onto your host. It's a literal drop-in replacement — no figuring out which file goes where. The zip uses an internal folder named `no-moon-v93-fang-and-finale/`.
+That zip has the **entire website folder structure** inside, ready to unzip onto your host. It's a literal drop-in replacement — no figuring out which file goes where. The zip uses an internal folder named `no-moon-v94-drowned-sky-expansion/`.
 
 Inside the zip:
 
 ```
-no-moon-v93-fang-and-finale/
+no-moon-v94-drowned-sky-expansion/
 ├── README_UPLOAD_THIS.txt    ← read this first, it explains everything in the build
 ├── index.html                ← your site landing
 ├── book.html
@@ -94,11 +94,11 @@ That single line is enough to get the same package format.
 Open the browser console on the live game and run:
 
 ```js
-state.v93Debug()
-state.v93SelfTest()
+state.v94Debug()
+state.v94SelfTest()
 ```
 
-Paste me the JSON. That tells me which build tag is actually live, what captain is in the current room (if any), how many ghost cameos are active, the crater-reveal state — usually enough to diagnose without guessing. (`noMoonCurrentDebug()` and `noMoonCurrentSelfTest()` also work; they always point at the latest build.)
+Paste me the JSON. That tells me which build tag is actually live, whether you're in the Drowned Sky and what room kind, how many beams are active, whether the cache shrine is in this fork side, plus the v93 captain/sun-finale state (under `prior`). `noMoonCurrentDebug()` and `noMoonCurrentSelfTest()` also work; they always point at the latest build.
 
 If the codex looks weird or has duplicate Drowned Sun cards:
 

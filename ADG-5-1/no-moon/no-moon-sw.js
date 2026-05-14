@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-fang-and-finale-v93';
+const CACHE_NAME = 'no-moon-drowned-sky-expansion-v94';
 const ASSETS = [
   './',
   './index.html',

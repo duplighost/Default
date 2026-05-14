@@ -52011,7 +52011,809 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V93_VERSION;
   })();
 
+
+  // ===================================================================
+  // === v94 — Drowned Sky Expansion ===================================
+  // ===================================================================
+  // v80 already extended Drowned Sky to 8 rooms with a fork. v94 makes
+  // it feel like a real biome instead of a marked-out path:
+  //
+  //   1. TIDEFALL — the signature environmental hazard. Cold-blue beams
+  //      of light pulse down through the room at random columns; the
+  //      bright phase deals chip damage if you stand in it. Each room
+  //      kind has its own beam cadence and width. Player learns by
+  //      seeing: when the beams come, slide sideways between them.
+  //
+  //   2. DRIFT LANTERN — a new slow-floating enemy that pulses cold
+  //      light, drifts toward the player, and either dies cleanly or
+  //      detonates a slow ring after ~8s. Themed counterpart to the
+  //      Orbiter / Wake Comet roster.
+  //
+  //   3. CACHE SHRINE — one of the two fork sides becomes a Submerged
+  //      Reliquary on a coin flip, with a guaranteed module pickup at
+  //      center and two Drift Lanterns guarding it. Makes the fork
+  //      branch into a real choice.
+  //
+  //   4. AMBIENT — falling stars streak through every Drowned Sky
+  //      room. Broken submerged pillars in some kinds. Pure cosmetic
+  //      layer that sells the biome identity.
+  //
+  // v94 does not install any MutationObserver, does not touch the
+  // Codex DOM, and does not replace v80's room-build pipeline; it
+  // layers on top via syncActiveRoom / updateGame / updateEnemies /
+  // drawAmbientWorld / drawEnemy / killEnemy POST-base wraps.
+  // ===================================================================
+  (function installV94DrownedSkyExpansion() {
+    const V94_VERSION = 'qual.drowned-sky-expansion.2026-05-14.v94';
+    const CACHE94 = 'no-moon-drowned-sky-expansion-v94';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v94DrownedSkyExpansion && state.v94DrownedSkyExpansion.installed) return;
+
+    const sys = state.v94DrownedSkyExpansion = {
+      installed: true,
+      version: V94_VERSION,
+      cacheExpected: CACHE94,
+      basedOn: 'v93 fang-and-finale + Drowned Sky expansion (Tidefall + Drift Lantern + cache shrine + ambient).',
+      stats: {
+        roomsInitialized: 0,
+        tidefallBeamFires: 0,
+        tidefallHits: 0,
+        driftLanternsSpawned: 0,
+        driftLanternsExploded: 0,
+        driftLanternKills: 0,
+        cacheShrinesMarked: 0,
+        cacheRewardsDropped: 0,
+        fallingStarsSpawned: 0,
+        lastError: null
+      }
+    };
+
+    function log94(e, where) {
+      try {
+        const msg = (where || 'v94') + ': ' + (e && (e.message || String(e)) || 'unknown');
+        sys.stats.lastError = msg;
+        console.warn('[No Moon v94]', msg, e);
+      } catch (_) {}
+    }
+    function N94(v, def) { const n = Number(v); return Number.isFinite(n) ? n : (def || 0); }
+    function rand94(a, b) { return a + Math.random() * (b - a); }
+    function rgba94(color, alpha) {
+      try {
+        if (typeof rgba === 'function') return rgba(color, alpha);
+        let h = String(color || '#fff').replace('#', '');
+        if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+        const n = parseInt(h, 16);
+        if (!Number.isFinite(n)) return 'rgba(189,231,255,' + alpha + ')';
+        return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+      } catch (_) { return 'rgba(189,231,255,' + alpha + ')'; }
+    }
+
+    function isDrownedSkyRoom94(room) {
+      return !!(room && (room._v79DrownedSky || room._v80DrownedSky || room._v94DrownedSky));
+    }
+    function roomKind94(room) {
+      // v80's room kind (entry/spine/open/fork/sideA/sideB/preboss/boss).
+      if (!room) return 'normal';
+      if (room._v80RoomKind) return room._v80RoomKind;
+      if (room._v79IsBoss) return 'boss';
+      return 'normal';
+    }
+    function currentRoom94() {
+      try {
+        return (state.level && Array.isArray(state.level.rooms)) ? state.level.rooms[state.level.currentRoomId] : null;
+      } catch (_) { return null; }
+    }
+
+    // ===================================================================
+    // ENEMY REGISTRATION — Drift Lantern
+    // ===================================================================
+    function registerDriftLantern94() {
+      try {
+        if (typeof ENEMY_TYPES === 'undefined' || !ENEMY_TYPES) return false;
+        if (!ENEMY_TYPES.v94DriftLantern) {
+          ENEMY_TYPES.v94DriftLantern = {
+            display: 'Drift Lantern',
+            cost: 5,
+            r: 18,
+            hp: 5,
+            speed: 36,
+            color: '#bde7ff',
+            wake: 9999,
+            behavior: 'v94DriftLantern',
+            boss: false
+          };
+        }
+        return true;
+      } catch (e) { log94(e, 'registerDriftLantern'); return false; }
+    }
+
+    // Explosion ghosts are independent of the lantern enemy itself
+    // (which goes through the normal kill path so scoring + room-clear
+    // checks still fire). Each ghost lives ~0.55s in state._v94Explosions.
+    state._v94Explosions = state._v94Explosions || [];
+    function spawnDriftExplosion94(x, y, color, r) {
+      try {
+        state._v94Explosions = state._v94Explosions || [];
+        state._v94Explosions.push({
+          x: N94(x, 0),
+          y: N94(y, 0),
+          color: color || '#bde7ff',
+          r: N94(r, 18),
+          age: 0,
+          damaged: false
+        });
+        sys.stats.driftLanternsExploded += 1;
+      } catch (err) { log94(err, 'spawnDriftExplosion'); }
+    }
+    function tickDriftLantern94(e, dt) {
+      try {
+        if (!e || e.remove) return;
+        const p = state.player;
+        if (!p) return;
+        e._v94 = e._v94 || { age: 0, pulse: rand94(0, Math.PI * 2), aggression: 1 };
+        const v = e._v94;
+        v.age = N94(v.age, 0) + dt;
+        v.pulse += dt * 2.4;
+        const dx = p.x - e.x;
+        const dy = p.y - e.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const speed = N94(e.speed, 36) * (0.55 + 0.35 * v.aggression);
+        e.x += (dx / dist) * speed * dt;
+        e.y += (dy / dist) * speed * dt;
+        v.aggression = Math.max(0.6, v.aggression * 0.985);
+        // Self-detonate at 8s of life — spawns a ghost and removes the
+        // lantern so room-clear math still works.
+        if (v.age > 8 && !v.timedOut) {
+          v.timedOut = true;
+          spawnDriftExplosion94(e.x, e.y, e.color || '#bde7ff', N94(e.r, 18));
+          e.remove = true;
+        }
+      } catch (err) { log94(err, 'tickDriftLantern'); }
+    }
+    function tickDriftLanternExplosions94(dt) {
+      try {
+        const exs = state._v94Explosions;
+        if (!exs || !exs.length) return;
+        const d = Math.min(0.08, Math.max(0, N94(dt, 0.016)));
+        for (let i = exs.length - 1; i >= 0; i--) {
+          const ex = exs[i];
+          ex.age += d;
+          if (ex.age >= 0.35 && !ex.damaged) {
+            const p = state.player;
+            if (p) {
+              const dist = Math.hypot(p.x - ex.x, p.y - ex.y);
+              if (dist < ex.r * 4.4 + N94(p.r, 17)) {
+                try {
+                  if (typeof damagePlayer === 'function') damagePlayer(1, { sourceEnemyType: 'v94DriftLantern' });
+                  else if (typeof state.damagePlayer === 'function') state.damagePlayer(1);
+                } catch (_) {}
+                const dx = p.x - ex.x, dy = p.y - ex.y, dd = Math.hypot(dx, dy) || 1;
+                p.x += (dx / dd) * 22; p.y += (dy / dd) * 22;
+              }
+            }
+            ex.damaged = true;
+          }
+          if (ex.age >= 0.55) exs.splice(i, 1);
+        }
+      } catch (e) { log94(e, 'tickExplosions'); }
+    }
+    function drawDriftExplosions94() {
+      try {
+        const exs = state._v94Explosions;
+        if (!exs || !exs.length) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        for (const ex of exs) {
+          const ph = Math.min(1, ex.age / 0.55);
+          const ringR = ex.r * (1.6 + 3.0 * ph);
+          ctx.strokeStyle = rgba94('#dff6ff', 0.72 * (1 - ph));
+          ctx.lineWidth = 4 + 6 * ph;
+          ctx.beginPath(); ctx.arc(ex.x, ex.y, ringR, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = rgba94(ex.color, 0.36 * (1 - ph));
+          ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.arc(ex.x, ex.y, ringR * 1.3, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
+      } catch (e) { log94(e, 'drawDriftExplosions'); }
+    }
+
+    function drawDriftLantern94(e) {
+      try {
+        if (!e || e.remove || !e._v94) return false;
+        if (e.behavior !== 'v94DriftLantern' && e.typeId !== 'v94DriftLantern') return false;
+        const v = e._v94;
+        const t = N94(state.time, 0);
+        const r = N94(e.r, 18);
+        const color = e.color || '#bde7ff';
+        const breathe = 0.78 + 0.22 * Math.sin(v.pulse + t * 1.4);
+        ctx.save();
+        // Outer pulsing halo.
+        ctx.globalCompositeOperation = 'screen';
+        if (typeof drawSoftGlow === 'function') {
+          drawSoftGlow(ctx, e.x, e.y, r * (2.4 + 0.6 * breathe), color, 0.30 * breathe, 0.06, 0);
+        } else {
+          ctx.fillStyle = rgba94(color, 0.18 * breathe);
+          ctx.beginPath(); ctx.arc(e.x, e.y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+        }
+        // Lantern body — dark core with cold rim.
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(2,4,18,0.92)';
+        ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = rgba94(color, 0.86);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Cold light core that breathes with the pulse.
+        const coreScale = 0.46 + 0.24 * Math.sin(v.pulse + t * 1.9);
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = rgba94('#dff6ff', 0.62 * coreScale);
+        ctx.beginPath(); ctx.arc(e.x, e.y, r * 0.55, 0, Math.PI * 2); ctx.fill();
+        // Two concentric rings rotating slowly.
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = rgba94(color, 0.34);
+        ctx.lineWidth = 1.2;
+        const ringPhase = v.pulse * 0.5;
+        for (let i = 0; i < 2; i++) {
+          const rr = r * (1.4 + i * 0.4);
+          ctx.beginPath();
+          for (let a = 0; a < 8; a++) {
+            const ang = a * Math.PI / 4 + ringPhase + i * Math.PI / 8;
+            const px = e.x + Math.cos(ang) * rr;
+            const py = e.y + Math.sin(ang) * rr;
+            if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+        // "About to detonate" warning bloom in the last second of life.
+        if (v.age > 7) {
+          const warn = Math.min(1, (v.age - 7) / 1);
+          ctx.globalCompositeOperation = 'screen';
+          ctx.strokeStyle = rgba94('#dff6ff', 0.42 * warn);
+          ctx.lineWidth = 1.6 + 2 * warn;
+          ctx.beginPath(); ctx.arc(e.x, e.y, r * (1.05 + 0.4 * warn), 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
+        return true;
+      } catch (e) { log94(e, 'drawDriftLantern'); return false; }
+    }
+
+    // ===================================================================
+    // TIDEFALL — signature environmental hazard
+    // ===================================================================
+    // Per-room state stored at room._v94Tidefall. Each entry has a list
+    // of beams with phase + a spawn timer. Beams sweep down a column
+    // with a brief warning, then a bright damage phase, then a fade.
+    // ===================================================================
+    const TIDEFALL_PROFILES_94 = {
+      entry:   { beamCount: 1, spawnEvery: 2.6, beamW: 70, warn: 0.55, bright: 0.75, fade: 0.40, damage: 1 },
+      spine:   { beamCount: 2, spawnEvery: 2.1, beamW: 78, warn: 0.50, bright: 0.80, fade: 0.40, damage: 1 },
+      open:    { beamCount: 2, spawnEvery: 2.0, beamW: 82, warn: 0.50, bright: 0.85, fade: 0.40, damage: 1 },
+      fork:    { beamCount: 2, spawnEvery: 2.2, beamW: 76, warn: 0.55, bright: 0.80, fade: 0.40, damage: 1 },
+      side:    { beamCount: 3, spawnEvery: 1.8, beamW: 70, warn: 0.45, bright: 0.85, fade: 0.40, damage: 1 },
+      preboss: { beamCount: 2, spawnEvery: 1.7, beamW: 84, warn: 0.45, bright: 0.85, fade: 0.40, damage: 1 },
+      boss:    { beamCount: 1, spawnEvery: 3.0, beamW: 88, warn: 0.65, bright: 0.70, fade: 0.40, damage: 1 },
+      normal:  { beamCount: 2, spawnEvery: 2.2, beamW: 78, warn: 0.55, bright: 0.80, fade: 0.40, damage: 1 }
+    };
+    function profileFor94(room) {
+      const k = roomKind94(room);
+      if (k === 'sideA' || k === 'sideB') return TIDEFALL_PROFILES_94.side;
+      return TIDEFALL_PROFILES_94[k] || TIDEFALL_PROFILES_94.normal;
+    }
+
+    function ensureTidefall94(room) {
+      try {
+        if (!isDrownedSkyRoom94(room)) return null;
+        if (room._v94Tidefall) return room._v94Tidefall;
+        const prof = profileFor94(room);
+        room._v94Tidefall = {
+          beams: [],
+          nextSpawn: rand94(0.5, prof.spawnEvery * 0.8),
+          profile: prof,
+          hitCooldown: 0
+        };
+        sys.stats.roomsInitialized += 1;
+        return room._v94Tidefall;
+      } catch (e) { log94(e, 'ensureTidefall'); return null; }
+    }
+
+    function spawnBeam94(room, tf) {
+      try {
+        if (!room || !tf) return;
+        const prof = tf.profile;
+        const w = N94(room.width, 1240);
+        const wall = N94(room.wall, 80);
+        const x = rand94(wall + prof.beamW * 0.6, w - wall - prof.beamW * 0.6);
+        tf.beams.push({
+          x: x,
+          beamW: prof.beamW,
+          age: 0,
+          warn: prof.warn,
+          bright: prof.bright,
+          fade: prof.fade,
+          maxLife: prof.warn + prof.bright + prof.fade,
+          damage: prof.damage,
+          hitOnce: false
+        });
+        sys.stats.tidefallBeamFires += 1;
+      } catch (e) { log94(e, 'spawnBeam'); }
+    }
+
+    function tickTidefall94(dt) {
+      try {
+        const room = currentRoom94();
+        if (!isDrownedSkyRoom94(room)) return;
+        const tf = ensureTidefall94(room);
+        if (!tf) return;
+        const d = Math.min(0.08, Math.max(0, N94(dt, 0.016)));
+        tf.nextSpawn -= d;
+        if (tf.nextSpawn <= 0 && tf.beams.length < tf.profile.beamCount + 1) {
+          spawnBeam94(room, tf);
+          tf.nextSpawn = rand94(tf.profile.spawnEvery * 0.7, tf.profile.spawnEvery * 1.25);
+        }
+        tf.hitCooldown = Math.max(0, tf.hitCooldown - d);
+        for (let i = tf.beams.length - 1; i >= 0; i--) {
+          const b = tf.beams[i];
+          b.age += d;
+          if (b.age >= b.maxLife) { tf.beams.splice(i, 1); continue; }
+          // Damage phase: between warn and warn+bright.
+          if (b.age >= b.warn && b.age < b.warn + b.bright && tf.hitCooldown <= 0) {
+            const p = state.player;
+            if (p && Math.abs(p.x - b.x) < b.beamW * 0.5 + N94(p.r, 17) * 0.5) {
+              try {
+                if (typeof damagePlayer === 'function') damagePlayer(b.damage, { sourceEnemyType: 'v94Tidefall' });
+                else if (typeof state.damagePlayer === 'function') state.damagePlayer(b.damage);
+              } catch (_) {}
+              tf.hitCooldown = 0.55;
+              sys.stats.tidefallHits += 1;
+            }
+          }
+        }
+      } catch (e) { log94(e, 'tickTidefall'); }
+    }
+
+    function drawTidefall94() {
+      try {
+        const room = currentRoom94();
+        if (!isDrownedSkyRoom94(room)) return;
+        const tf = room._v94Tidefall;
+        if (!tf || !tf.beams.length) return;
+        const h = N94(room.height, 900);
+        const t = N94(state.time, 0);
+        ctx.save();
+        for (const b of tf.beams) {
+          let intensity;
+          if (b.age < b.warn) intensity = (b.age / b.warn) * 0.32;          // warn ramp
+          else if (b.age < b.warn + b.bright) intensity = 0.32 + 0.58 * Math.min(1, (b.age - b.warn) / 0.12); // brighten
+          else intensity = 0.90 * (1 - Math.min(1, (b.age - b.warn - b.bright) / b.fade));                    // fade
+          const x = b.x;
+          const w = b.beamW;
+          // Outer glow.
+          ctx.globalCompositeOperation = 'screen';
+          const grad = ctx.createLinearGradient(x - w, 0, x + w, 0);
+          grad.addColorStop(0,   rgba94('#bde7ff', 0));
+          grad.addColorStop(0.5, rgba94('#bde7ff', 0.48 * intensity));
+          grad.addColorStop(1,   rgba94('#bde7ff', 0));
+          ctx.fillStyle = grad;
+          ctx.fillRect(x - w, 0, w * 2, h);
+          // Inner core.
+          const coreW = w * 0.36;
+          const coreGrad = ctx.createLinearGradient(x - coreW, 0, x + coreW, 0);
+          coreGrad.addColorStop(0,   rgba94('#dff6ff', 0));
+          coreGrad.addColorStop(0.5, rgba94('#dff6ff', 0.66 * intensity));
+          coreGrad.addColorStop(1,   rgba94('#dff6ff', 0));
+          ctx.fillStyle = coreGrad;
+          ctx.fillRect(x - coreW, 0, coreW * 2, h);
+          // Falling cold flecks inside the beam.
+          ctx.globalCompositeOperation = 'screen';
+          const flecks = 8;
+          for (let i = 0; i < flecks; i++) {
+            const fy = ((i / flecks) * h + (t * 220 + i * 53) % h) % h;
+            ctx.fillStyle = rgba94('#ffffff', 0.55 * intensity);
+            ctx.beginPath();
+            ctx.arc(x + Math.sin(i + t * 2) * coreW * 0.4, fy, 1.2 + (i % 2) * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      } catch (e) { log94(e, 'drawTidefall'); }
+    }
+
+    // ===================================================================
+    // CACHE SHRINE — mark a fork side as a Submerged Reliquary
+    // ===================================================================
+    // Coin flip per fork-entry: sideA or sideB becomes the cache. On
+    // first entry into that room we spawn a guaranteed module pickup
+    // at center plus 2 Drift Lanterns guarding it.
+    // ===================================================================
+    function pickCacheSide94(level) {
+      try {
+        if (!level || level._v94CacheSidePicked) return level && level._v94CacheSide;
+        // Find sideA and sideB rooms in the same level.
+        const sides = (level.rooms || []).filter(function (r) {
+          return r && (r._v80RoomKind === 'sideA' || r._v80RoomKind === 'sideB');
+        });
+        if (!sides.length) return null;
+        const pick = sides[Math.floor(Math.random() * sides.length)];
+        if (pick) {
+          pick._v94CacheShrine = true;
+          level._v94CacheSidePicked = true;
+          level._v94CacheSide = pick._v80RoomKind;
+          sys.stats.cacheShrinesMarked += 1;
+        }
+        return level._v94CacheSide;
+      } catch (e) { log94(e, 'pickCacheSide'); return null; }
+    }
+
+    function ensureCacheContents94(room) {
+      try {
+        if (!room || !room._v94CacheShrine || room._v94CacheReady) return;
+        // Drop one module pickup at center.
+        room.pickups = room.pickups || [];
+        room.pickups.push({
+          type: 'module',
+          x: N94(room.width, 1240) * 0.5,
+          y: N94(room.height, 900) * 0.5,
+          vx: 0, vy: 0, r: 11,
+          age: 0,
+          bob: rand94(0, Math.PI * 2),
+          remove: false,
+          _v94CacheReward: true
+        });
+        sys.stats.cacheRewardsDropped += 1;
+        // Spawn 2 Drift Lanterns flanking the reward.
+        if (typeof createEnemy === 'function' && registerDriftLantern94()) {
+          const w = N94(room.width, 1240), h = N94(room.height, 900);
+          for (let i = 0; i < 2; i++) {
+            const x = w * 0.5 + (i === 0 ? -1 : 1) * w * 0.22;
+            const y = h * 0.5;
+            const e = createEnemy('v94DriftLantern', x, y, state.levelIndex || 0);
+            if (e) {
+              e.wakeRadius = Math.max(N94(e.wakeRadius, 0), 9999);
+              e.wake = 9999;
+              e._v94CacheGuard = true;
+              room.enemies = room.enemies || [];
+              if (!room.enemies.includes(e)) room.enemies.push(e);
+              if (state.enemies && !state.enemies.includes(e)) state.enemies.push(e);
+              sys.stats.driftLanternsSpawned += 1;
+            }
+          }
+        }
+        room._v94CacheReady = true;
+      } catch (e) { log94(e, 'ensureCacheContents'); }
+    }
+
+    // ===================================================================
+    // AMBIENT — falling stars + broken submerged pillars
+    // ===================================================================
+    function ensureAmbient94(room) {
+      try {
+        if (!isDrownedSkyRoom94(room)) return;
+        if (room._v94Ambient) return;
+        const w = N94(room.width, 1240), h = N94(room.height, 900);
+        const stars = [];
+        const initial = 4;
+        for (let i = 0; i < initial; i++) {
+          stars.push({
+            x: rand94(80, w - 80),
+            y: rand94(-h * 0.4, h * 0.7),
+            vy: rand94(220, 380),
+            len: rand94(28, 60),
+            life: 0,
+            maxLife: rand94(1.4, 2.8),
+            color: Math.random() < 0.5 ? '#dff6ff' : '#bde7ff'
+          });
+        }
+        const pillars = [];
+        const kind = roomKind94(room);
+        if (kind === 'open' || kind === 'fork' || kind === 'sideA' || kind === 'sideB') {
+          const count = kind === 'fork' ? 4 : 3;
+          for (let i = 0; i < count; i++) {
+            pillars.push({
+              x: w * (0.18 + (i / count) * 0.64),
+              y: h * (0.18 + Math.random() * 0.20),
+              w: rand94(34, 60),
+              h: rand94(90, 180),
+              tilt: rand94(-0.18, 0.18),
+              seed: Math.random()
+            });
+          }
+        }
+        room._v94Ambient = { stars: stars, pillars: pillars, nextStarSpawn: rand94(0.5, 1.8) };
+      } catch (e) { log94(e, 'ensureAmbient'); }
+    }
+
+    function tickAmbient94(dt) {
+      try {
+        const room = currentRoom94();
+        if (!isDrownedSkyRoom94(room)) return;
+        ensureAmbient94(room);
+        const amb = room._v94Ambient;
+        if (!amb) return;
+        const d = Math.min(0.08, Math.max(0, N94(dt, 0.016)));
+        const h = N94(room.height, 900);
+        amb.nextStarSpawn -= d;
+        if (amb.nextStarSpawn <= 0 && amb.stars.length < 7) {
+          amb.stars.push({
+            x: rand94(80, N94(room.width, 1240) - 80),
+            y: -40,
+            vy: rand94(240, 420),
+            len: rand94(28, 60),
+            life: 0,
+            maxLife: rand94(1.4, 2.6),
+            color: Math.random() < 0.5 ? '#dff6ff' : '#bde7ff'
+          });
+          amb.nextStarSpawn = rand94(0.7, 2.4);
+          sys.stats.fallingStarsSpawned += 1;
+        }
+        for (let i = amb.stars.length - 1; i >= 0; i--) {
+          const s = amb.stars[i];
+          s.life += d;
+          s.y += s.vy * d;
+          if (s.y > h + 80 || s.life > s.maxLife) amb.stars.splice(i, 1);
+        }
+      } catch (e) { log94(e, 'tickAmbient'); }
+    }
+
+    function drawAmbient94() {
+      try {
+        const room = currentRoom94();
+        if (!isDrownedSkyRoom94(room)) return;
+        const amb = room._v94Ambient;
+        if (!amb) return;
+        ctx.save();
+        // Pillars: drawn first so they sit behind beams + enemies.
+        for (const p of amb.pillars) {
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.tilt);
+          // Pillar body — dark stone with cold rim.
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = 'rgba(8,10,28,0.78)';
+          ctx.fillRect(-p.w * 0.5, 0, p.w, p.h);
+          ctx.globalCompositeOperation = 'screen';
+          ctx.strokeStyle = rgba94('#5a7bff', 0.34);
+          ctx.lineWidth = 1.4;
+          ctx.strokeRect(-p.w * 0.5, 0, p.w, p.h);
+          // Cracks (deterministic-ish from seed).
+          ctx.strokeStyle = rgba94('#bde7ff', 0.24);
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(-p.w * 0.2 + p.seed * 8, 0);
+          ctx.lineTo(-p.w * 0.05 + p.seed * 4, p.h * 0.6);
+          ctx.lineTo(p.w * 0.1, p.h);
+          ctx.stroke();
+          ctx.restore();
+        }
+        // Falling stars: thin streaks with a head bloom.
+        for (const s of amb.stars) {
+          ctx.globalCompositeOperation = 'screen';
+          const trailAlpha = 0.62 * (1 - Math.min(1, s.life / s.maxLife));
+          const grad = ctx.createLinearGradient(s.x, s.y - s.len, s.x, s.y);
+          grad.addColorStop(0, rgba94(s.color, 0));
+          grad.addColorStop(1, rgba94(s.color, trailAlpha));
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(s.x, s.y - s.len);
+          ctx.lineTo(s.x, s.y);
+          ctx.stroke();
+          ctx.fillStyle = rgba94('#ffffff', trailAlpha * 0.88);
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, 1.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      } catch (e) { log94(e, 'drawAmbient'); }
+    }
+
+    // ===================================================================
+    // WRAPS — install everything POST-base so v94 layers on cleanly.
+    // ===================================================================
+    if (typeof syncActiveRoom === 'function' && !syncActiveRoom.__v94DSE) {
+      const baseSync94 = syncActiveRoom;
+      syncActiveRoom = function syncActiveRoomV94(level, roomId, fromSide) {
+        const out = baseSync94.apply(this, arguments);
+        try {
+          const room = level && level.rooms ? level.rooms[roomId] : null;
+          if (isDrownedSkyRoom94(room)) {
+            pickCacheSide94(level);
+            ensureTidefall94(room);
+            ensureAmbient94(room);
+            if (room._v94CacheShrine) ensureCacheContents94(room);
+          }
+        } catch (e) { log94(e, 'syncActiveRoomWrap'); }
+        return out;
+      };
+      syncActiveRoom.__v94DSE = true;
+    }
+
+    if (typeof updateGame === 'function' && !updateGame.__v94DSE) {
+      const baseUpdate94 = updateGame;
+      updateGame = function updateGameV94(dt) {
+        const out = baseUpdate94.apply(this, arguments);
+        try {
+          tickTidefall94(dt);
+          tickAmbient94(dt);
+          tickDriftLanternExplosions94(dt);
+        } catch (e) { log94(e, 'updateGameWrap'); }
+        return out;
+      };
+      updateGame.__v94DSE = true;
+    }
+
+    if (typeof updateEnemies === 'function' && !updateEnemies.__v94DSE) {
+      const baseUpdateEnemies94 = updateEnemies;
+      updateEnemies = function updateEnemiesV94(dt) {
+        const out = baseUpdateEnemies94.apply(this, arguments);
+        try {
+          if (state.mode === 'play') {
+            for (const e of state.enemies || []) {
+              if (!e || e.remove) continue;
+              if (e.behavior === 'v94DriftLantern' || e.typeId === 'v94DriftLantern') {
+                tickDriftLantern94(e, dt);
+              }
+            }
+          }
+        } catch (e) { log94(e, 'updateEnemiesWrap'); }
+        return out;
+      };
+      updateEnemies.__v94DSE = true;
+    }
+
+    if (typeof drawAmbientWorld === 'function' && !drawAmbientWorld.__v94DSE) {
+      const baseAmbient94 = drawAmbientWorld;
+      drawAmbientWorld = function drawAmbientWorldV94(level) {
+        const out = baseAmbient94.apply(this, arguments);
+        try {
+          drawAmbient94();
+          drawTidefall94();
+          drawDriftExplosions94();
+        } catch (e) { log94(e, 'drawAmbientWrap'); }
+        return out;
+      };
+      drawAmbientWorld.__v94DSE = true;
+    }
+
+    if (typeof drawEnemy === 'function' && !drawEnemy.__v94DSE) {
+      const baseDrawEnemy94 = drawEnemy;
+      drawEnemy = function drawEnemyV94(enemy) {
+        // Drift Lantern is fully custom-drawn; suppress base to avoid
+        // a default sprite mismatch. Other enemies fall through.
+        try {
+          if (enemy && (enemy.behavior === 'v94DriftLantern' || enemy.typeId === 'v94DriftLantern')) {
+            if (drawDriftLantern94(enemy)) return;
+          }
+        } catch (e) { log94(e, 'drawEnemyShim'); }
+        return baseDrawEnemy94.apply(this, arguments);
+      };
+      drawEnemy.__v94DSE = true;
+    }
+
+    if (typeof killEnemy === 'function' && !killEnemy.__v94DSE) {
+      const baseKill94 = killEnemy;
+      killEnemy = function killEnemyV94(enemy, bullet) {
+        // Drift lanterns always leave a delayed explosion ring behind
+        // them on death (so a killed lantern still threatens the spot
+        // it died in). We snapshot position BEFORE base, then call
+        // base normally so scoring + room-clear math run as usual,
+        // then spawn an independent explosion ghost.
+        const wasDriftLantern = !!(enemy && (enemy.behavior === 'v94DriftLantern' || enemy.typeId === 'v94DriftLantern') && !enemy.remove);
+        let snapX = 0, snapY = 0, snapColor = '#bde7ff', snapR = 18;
+        if (wasDriftLantern) {
+          snapX = N94(enemy.x, 0);
+          snapY = N94(enemy.y, 0);
+          snapColor = enemy.color || '#bde7ff';
+          snapR = N94(enemy.r, 18);
+        }
+        const out = baseKill94.apply(this, arguments);
+        if (wasDriftLantern) {
+          try {
+            spawnDriftExplosion94(snapX, snapY, snapColor, snapR);
+            sys.stats.driftLanternKills += 1;
+          } catch (e) { log94(e, 'killEnemyDrift'); }
+        }
+        return out;
+      };
+      killEnemy.__v94DSE = true;
+    }
+
+    // ===================================================================
+    // Tag, debug, self-test
+    // ===================================================================
+    function tag94() {
+      try {
+        let changed = false;
+        if (state.buildTag !== V94_VERSION) { state.buildTag = V94_VERSION; changed = true; }
+        if (typeof document !== 'undefined') {
+          const tag = document.getElementById('buildTagDisplay');
+          const desired = 'build: ' + V94_VERSION;
+          if (tag && tag.textContent !== desired) { tag.textContent = desired; changed = true; }
+          if (document.documentElement && document.documentElement.dataset.noMoonBuild !== V94_VERSION) {
+            document.documentElement.dataset.noMoonBuild = V94_VERSION;
+            changed = true;
+          }
+        }
+        return changed;
+      } catch (_) { return false; }
+    }
+
+    state.v94Debug = function v94Debug() {
+      let prior = null;
+      try { prior = typeof state.v93Debug === 'function' ? state.v93Debug() : null; } catch (_) {}
+      tag94();
+      const room = currentRoom94();
+      const tf = room && room._v94Tidefall;
+      const amb = room && room._v94Ambient;
+      return {
+        version: V94_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE94,
+        mode: state.mode,
+        inDrownedSky: !!(state._v80InDrownedSky || state._v79InDrownedSky),
+        room: room ? {
+          id: room.id,
+          drownedSky: isDrownedSkyRoom94(room),
+          kind: roomKind94(room),
+          cacheShrine: !!room._v94CacheShrine,
+          cacheReady: !!room._v94CacheReady,
+          beams: tf ? tf.beams.length : 0,
+          stars: amb ? amb.stars.length : 0,
+          pillars: amb ? amb.pillars.length : 0
+        } : null,
+        cacheSide: state.level && state.level._v94CacheSide || null,
+        driftLanterns: (state.enemies || []).filter(function (e) { return e && (e.behavior === 'v94DriftLantern' || e.typeId === 'v94DriftLantern') && !e.remove; }).length,
+        stats: Object.assign({}, sys.stats),
+        prior: prior
+      };
+    };
+
+    state.v94SelfTest = function v94SelfTest() {
+      const out = { version: V94_VERSION };
+      const run = function (name, fn) {
+        try { out[name] = fn(); }
+        catch (e) { out[name] = { ok: false, error: String(e && (e.message || e)) }; }
+      };
+      run('boot', function () {
+        tag94();
+        return { ok: state.buildTag === V94_VERSION, tag: state.buildTag, cache: CACHE94 };
+      });
+      run('driftLanternRegistered', function () {
+        registerDriftLantern94();
+        return { ok: !!(typeof ENEMY_TYPES !== 'undefined' && ENEMY_TYPES && ENEMY_TYPES.v94DriftLantern), type: typeof ENEMY_TYPES !== 'undefined' && ENEMY_TYPES ? ENEMY_TYPES.v94DriftLantern : null };
+      });
+      run('tidefallProfileExistsForAllKinds', function () {
+        const kinds = ['entry', 'spine', 'open', 'fork', 'side', 'preboss', 'boss', 'normal'];
+        const missing = kinds.filter(function (k) { return !TIDEFALL_PROFILES_94[k]; });
+        return { ok: missing.length === 0, missing: missing };
+      });
+      run('cachePickIdempotent', function () {
+        if (!state.level || !Array.isArray(state.level.rooms)) return { ok: true, skipped: 'no-level' };
+        const first = pickCacheSide94(state.level);
+        const second = pickCacheSide94(state.level);
+        return { ok: first === second, first: first, second: second };
+      });
+      out.ok = Object.keys(out).filter(function (k) { return k !== 'version' && k !== 'ok'; }).every(function (k) { return out[k] && out[k].ok !== false; });
+      tag94();
+      return out;
+    };
+
+    try {
+      registerDriftLantern94();
+      tag94();
+      setTimeout(function () { try { registerDriftLantern94(); tag94(); } catch (_) {} }, 0);
+      setTimeout(function () { try { tag94(); } catch (_) {} }, 400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V94_DROWNED_SKY_EXPANSION__ = sys;
+        window.noMoonV94Debug = function () { return state.v94Debug(); };
+        window.noMoonV94SelfTest = function () { return state.v94SelfTest(); };
+        window.noMoonCurrentDebug = window.noMoonV94Debug;
+        window.noMoonCurrentSelfTest = window.noMoonV94SelfTest;
+      }
+    } catch (e) { log94(e, 'install'); }
+    state.buildTag = V94_VERSION;
+  })();
+
   renderCodexStats();
 
 })();
-</html>
+</script>
