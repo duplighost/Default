@@ -1,0 +1,16 @@
+No Moon v90 — safe convergence Netlify build
+
+Base selected: uploaded no-moon-v89-website.zip / v89_release, because it is Claude's recovery line based on the known-booting Pro v85 deep-bugfix pass.
+
+What changed in v90:
+- Disconnects legacy v85/v86/v87/v88 Codex MutationObservers and replaces them with one paused, debounced, idempotent v90 repair path.
+- Keeps the Drowned Sun boss card/count repair, but only writes DOM when values actually differ.
+- Re-ports the useful v86 reroll-capture fallback and stronger chooseDifferent behavior without touching title/start controls.
+- Re-ports radius/r + finite bullet normalization with a single v90 bullet-array guard, plus createBullet post-normalization.
+- Re-ports boss-bullet tagging so Black Anchor does not freeze major boss hazards.
+- Re-ports custom Sun/Drowned victory-room exit protection and one-time Drowned Sky active-charge credit without double-crediting v85.
+- Adds mobile touch aim repair during play only.
+- Adds conservative Moots false-unlock scrubbing.
+- Bumps game service-worker cache to no-moon-safe-convergence-netlify-v90.
+
+Netlify deploy-root layout is preserved: index.html, book.html, no-moon.html, _redirects, assets/, no-moon/.

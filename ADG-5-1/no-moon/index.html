@@ -953,7 +953,6 @@
 <button id="musicToggle" type="button" aria-label="Toggle background music" data-on="0">BGM OFF</button>
 
 <script>
-
 (() => {
   'use strict';
 
@@ -3331,32 +3330,17 @@ let hudMenuOpen = false;
 
   function installManifest() {
     try {
-      const currentPage = new URL(location.href);
-      currentPage.hash = '';
-      const icon = buildPwaIconDataUri();
-      const manifest = {
-        id: new URL('./', location.href).pathname,
-        name: 'No Moon',
-        short_name: 'No Moon',
-        display: 'fullscreen',
-        background_color: THEME_COLOR,
-        theme_color: THEME_COLOR,
-        start_url: new URL('./', location.href).pathname,
-        scope: new URL('./', location.href).pathname,
-        icons: [
-          { src: icon, sizes: '192x192', type: 'image/svg+xml', purpose: 'any maskable' },
-          { src: icon, sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' }
-        ]
-      };
-      const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
-      const href = URL.createObjectURL(blob);
-      const prior = document.querySelector('link[rel="manifest"][data-no-moon]');
-      if (prior) prior.remove();
-      const link = document.createElement('link');
-      link.rel = 'manifest';
+      const href = '../assets/no-moon/no-moon.webmanifest';
+      const stale = Array.from(document.querySelectorAll('link[rel="manifest"][data-no-moon]'));
+      for (const prior of stale) prior.remove();
+      let link = document.querySelector('link[rel="manifest"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'manifest';
+        document.head.appendChild(link);
+      }
       link.href = href;
       link.setAttribute('data-no-moon', '1');
-      document.head.appendChild(link);
       state.pwa.manifestReady = true;
     } catch (err) {
       state.pwa.manifestReady = false;
@@ -49887,10 +49871,1500 @@ function drawHudBossMiniStats(p, layout) {
   })();
 
 
+  // ===================================================================
+  // === v90 — Safe convergence: v89 recovery + re-ported hardening =====
+  // ===================================================================
+  // Base: Claude's v89 recovery line, itself based on the known-booting
+  // Pro v85 deep-bugfix pass. This pass deliberately does NOT reuse the
+  // v86/v87 Codex MutationObserver pattern that could self-trigger a DOM
+  // mutation loop. Instead, it disconnects legacy Codex observers, performs
+  // idempotent DOM writes only when content actually changes, and installs a
+  // single debounced observer that is paused while repairs write to the deck.
+  (function installV90SafeConvergenceNetlify() {
+    const V90_VERSION = 'qual.safe-convergence-netlify.2026-05-13.v90';
+    const CACHE90 = 'no-moon-safe-convergence-netlify-v90';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v90SafeConvergence && state.v90SafeConvergence.installed) return;
+
+    const sys = state.v90SafeConvergence = {
+      installed: true,
+      version: V90_VERSION,
+      cacheExpected: CACHE90,
+      basedOn: 'v89 recovery / v85 deep-bugfix, with safe v86-v88 fixes re-ported one at a time',
+      stats: {
+        buildTagsStamped: 0,
+        legacyCodexObserversDisconnected: 0,
+        codexSchedules: 0,
+        codexRepairs: 0,
+        codexWrites: 0,
+        codexDuplicatesRemoved: 0,
+        rerollInputs: 0,
+        rerollSuccesses: 0,
+        rerollDenied: 0,
+        bulletArraysGuarded: 0,
+        bulletsNormalized: 0,
+        bulletFiniteRepairs: 0,
+        bossBulletsTagged: 0,
+        createBulletWraps: 0,
+        customVictoryClearBypasses: 0,
+        customVictoryExitsReclosed: 0,
+        customClearCharges: 0,
+        touchAimRepairs: 0,
+        mootsScrubs: 0,
+        selfTestsRun: 0,
+        lastError: null
+      }
+    };
+
+    const N90 = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
+    const POS90 = (v, f = 4) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : f; };
+    const FIN90 = (v) => v !== null && v !== undefined && Number.isFinite(Number(v));
+    const NOW90 = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const SAVE90 = (typeof SAVE_KEY !== 'undefined' && SAVE_KEY) ? SAVE_KEY : 'noMoonSave_v1';
+    const MIRROR90 = 'noMoonProgress_v68';
+    const MAJOR_BOSS_RE90 = /warden|grave.?warden|archon|sun.?core|suncore|drowned.?sun|v79drownedsun|v80drownedsun|night.?ferry|false.?moon|falsemoon|spiggot/i;
+
+    function log90(e, where) {
+      try {
+        const msg = (where || 'v90') + ': ' + (e && (e.message || String(e)) || 'unknown');
+        sys.stats.lastError = msg;
+        console.warn('[No Moon v90]', msg, e);
+      } catch (_) {}
+    }
+    function tag90() {
+      try {
+        state.buildTag = V90_VERSION;
+        if (typeof document !== 'undefined') {
+          const tag = document.getElementById('buildTagDisplay');
+          if (tag) tag.textContent = 'build: ' + V90_VERSION;
+          if (document.documentElement) document.documentElement.dataset.noMoonBuild = V90_VERSION;
+        }
+        sys.stats.buildTagsStamped += 1;
+      } catch (_) {}
+    }
+    function readJson90(key) { try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (_) { return {}; } }
+    function writeJson90(key, value) { try { localStorage.setItem(key, JSON.stringify(value || {})); return true; } catch (_) { return false; } }
+    function currentRoom90() {
+      try { if (typeof currentRoom === 'function') return currentRoom(); } catch (_) {}
+      try { return state.level && (state.level.currentRoom || (state.level.rooms && state.level.rooms[state.level.currentRoomIndex])); } catch (_) { return null; }
+    }
+
+    // -----------------------------------------------------------------
+    // Codex safety: disconnect legacy self-triggering observers and replace
+    // them with a paused/idempotent observer.
+    // -----------------------------------------------------------------
+    let codexObserver90 = null;
+    let codexRepairing90 = false;
+    let codexScheduled90 = false;
+
+    function codexTarget90() {
+      try { return (typeof codexOverlay !== 'undefined' && codexOverlay && codexOverlay.querySelector) ? codexOverlay : null; }
+      catch (_) { return null; }
+    }
+    function disconnectLegacyCodexObservers90() {
+      try {
+        const target = codexTarget90();
+        if (!target) return 0;
+        let n = 0;
+        ['__v85DrownedSunObserver', '__v86CodexObserver', '__v87CodexObserver', '__v88CodexObserver'].forEach(function (key) {
+          try {
+            const obs = target[key];
+            if (obs && typeof obs.disconnect === 'function' && !obs.__v90Disconnected) {
+              obs.disconnect();
+              try { obs.__v90Disconnected = true; } catch (_) {}
+              n += 1;
+            }
+          } catch (_) {}
+        });
+        if (n) sys.stats.legacyCodexObserversDisconnected += n;
+        return n;
+      } catch (e) { log90(e, 'disconnectLegacyCodexObservers'); return 0; }
+    }
+    function pauseCodexObserver90() {
+      try { if (codexObserver90 && typeof codexObserver90.disconnect === 'function') codexObserver90.disconnect(); } catch (_) {}
+    }
+    function resumeCodexObserver90() {
+      try {
+        const target = codexTarget90();
+        if (!target || typeof MutationObserver === 'undefined') return false;
+        if (!codexObserver90) {
+          codexObserver90 = new MutationObserver(function () {
+            if (codexRepairing90 || codexScheduled90) return;
+            scheduleCodexRepair90('observer');
+          });
+        }
+        codexObserver90.observe(target, { childList: true, subtree: true });
+        try { target.__v90CodexObserver = codexObserver90; } catch (_) {}
+        return true;
+      } catch (e) { log90(e, 'resumeCodexObserver'); return false; }
+    }
+    function scheduleCodexRepair90(reason) {
+      try {
+        if (codexScheduled90) return false;
+        codexScheduled90 = true;
+        sys.stats.codexSchedules += 1;
+        setTimeout(function () {
+          try { codexScheduled90 = false; repairCodex90(reason || 'scheduled'); }
+          catch (e) { codexScheduled90 = false; log90(e, 'scheduledCodexRepair'); }
+        }, 0);
+        return true;
+      } catch (e) { log90(e, 'scheduleCodexRepair'); return false; }
+    }
+    function drownedSunRevealed90() {
+      try {
+        const s = state.save || {};
+        const m = readJson90(MIRROR90);
+        const sd = s.defeatedBosses || {}, sv = s.victories || {};
+        const md = m.defeatedBosses || {}, mv = m.victories || {};
+        return !!(sd.drownedSun || md.drownedSun || N90(sv.drownedSkyClears) > 0 || N90(mv.drownedSkyClears) > 0 || N90(sv.drownedSunClears) > 0 || N90(mv.drownedSunClears) > 0);
+      } catch (_) { return false; }
+    }
+    function writeAttr90(el, name, value) {
+      try {
+        if (!el || el.getAttribute(name) === String(value)) return false;
+        el.setAttribute(name, String(value));
+        sys.stats.codexWrites += 1;
+        return true;
+      } catch (_) { return false; }
+    }
+    function writeDataset90(el, key, value) {
+      try {
+        if (!el || !el.dataset || el.dataset[key] === String(value)) return false;
+        el.dataset[key] = String(value);
+        sys.stats.codexWrites += 1;
+        return true;
+      } catch (_) { return false; }
+    }
+    function repairCodex90(reason) {
+      if (codexRepairing90) return false;
+      codexRepairing90 = true;
+      let changed = false;
+      try {
+        disconnectLegacyCodexObservers90();
+        pauseCodexObserver90();
+        const target = codexTarget90();
+        if (!target) return false;
+        const deck = target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector ? deck.querySelector('.v71BossGrid') : null;
+        if (!deck || !grid) return false;
+
+        const revealed = drownedSunRevealed90();
+        const selector = '[data-v81-boss="drownedSun"],[data-v85-boss="drownedSun"],[data-v86-boss="drownedSun"],[data-v87-boss="drownedSun"],[data-v90-boss="drownedSun"]';
+        const found = Array.from(grid.querySelectorAll(selector));
+        let card = found.find(function (el) { return el && el.dataset && el.dataset.v90Boss === 'drownedSun'; }) || found[0] || null;
+        for (const el of found) {
+          if (el !== card) {
+            try { el.remove(); changed = true; sys.stats.codexDuplicatesRemoved += 1; } catch (_) {}
+          }
+        }
+        if (!card) {
+          card = document.createElement('button');
+          card.type = 'button';
+          grid.appendChild(card);
+          changed = true;
+          sys.stats.codexWrites += 1;
+        } else if (card.parentNode !== grid) {
+          grid.appendChild(card);
+          changed = true;
+          sys.stats.codexWrites += 1;
+        }
+        if (card.type !== 'button') { try { card.type = 'button'; changed = true; sys.stats.codexWrites += 1; } catch (_) {} }
+        changed = writeDataset90(card, 'v81Boss', 'drownedSun') || changed;
+        changed = writeDataset90(card, 'v85Boss', 'drownedSun') || changed;
+        changed = writeDataset90(card, 'v90Boss', 'drownedSun') || changed;
+
+        const desiredClass = revealed ? 'v71BossCard revealed' : 'v71BossCard locked';
+        if (card.className !== desiredClass) { card.className = desiredClass; changed = true; sys.stats.codexWrites += 1; }
+        const desiredAria = revealed ? 'Drowned Sun defeated' : 'Sealed defeated-boss card';
+        changed = writeAttr90(card, 'aria-label', desiredAria) || changed;
+        const desiredHtml = revealed
+          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
+          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
+        if (card.innerHTML !== desiredHtml) { card.innerHTML = desiredHtml; changed = true; sys.stats.codexWrites += 1; }
+
+        const allCards = Array.from(grid.querySelectorAll('.v71BossCard'));
+        const isDrowned = function (el) { return !!(el && el.dataset && (el.dataset.v81Boss === 'drownedSun' || el.dataset.v85Boss === 'drownedSun' || el.dataset.v86Boss === 'drownedSun' || el.dataset.v87Boss === 'drownedSun' || el.dataset.v90Boss === 'drownedSun')); };
+        const baseCards = allCards.filter(function (el) { return !isDrowned(el); });
+        const baseRevealed = baseCards.filter(function (el) { return el.classList && el.classList.contains('revealed'); }).length;
+        const countEl = deck.querySelector('.v71BossDeckCount');
+        if (countEl) {
+          const txt = (baseRevealed + (revealed ? 1 : 0)) + '/' + (baseCards.length + 1) + ' revealed';
+          if (countEl.textContent !== txt) { countEl.textContent = txt; changed = true; sys.stats.codexWrites += 1; }
+        }
+        if (changed) sys.stats.codexRepairs += 1;
+        return changed;
+      } catch (e) { log90(e, 'repairCodex ' + (reason || '')); return false; }
+      finally {
+        codexRepairing90 = false;
+        try { resumeCodexObserver90(); } catch (_) {}
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Reroll fallback: catch every reroll button shape, including older
+    // generated buttons, and force genuinely different card sets when the
+    // item pool is tiny/skewed.
+    // -----------------------------------------------------------------
+    function activeDraft90() { return !!(state.mode === 'play' && state.draft && state.draft.active && !state.draft.resolved && Array.isArray(state.draft.cards) && state.draft.cards.length); }
+    function stars90() { return state.player ? Math.max(0, Math.floor(N90(state.player.moonSplinters))) : 0; }
+    function rerollCost90() { const used = state.draft ? Math.floor(N90(state.draft._v76StarRerolls)) : 0; return Math.max(3, 5 + used * 3); }
+    function key90(cards) { return (cards || []).slice().sort().join('|'); }
+    function shuffle90(list) {
+      const out = (list || []).slice();
+      for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = out[i]; out[i] = out[j]; out[j] = t; }
+      return out;
+    }
+    function availablePool90() {
+      try {
+        if (typeof ITEM_POOL === 'undefined' || !Array.isArray(ITEM_POOL)) return [];
+        return ITEM_POOL.filter(function (item) {
+          return item && item.id && (typeof ITEM_BY_ID === 'undefined' || ITEM_BY_ID[item.id]) && (typeof itemAvailableForDraft !== 'function' || itemAvailableForDraft(item));
+        }).map(function (item) { return item.id; });
+      } catch (_) { return []; }
+    }
+    function chooseDifferent90(count, oldCards) {
+      oldCards = Array.isArray(oldCards) ? oldCards.slice(0, count) : [];
+      const oldKey = key90(oldCards);
+      for (let i = 0; i < 40; i++) {
+        const next = (typeof chooseRandomItems === 'function') ? chooseRandomItems(count) : [];
+        if (Array.isArray(next) && next.length && key90(next) !== oldKey) return next.slice(0, count);
+      }
+      try {
+        const pool = availablePool90();
+        const oldSet = new Set(oldCards);
+        for (let i = 0; i < 40; i++) {
+          const cand = shuffle90(pool).slice(0, count);
+          if (cand.length && key90(cand) !== oldKey) return cand;
+        }
+        const fresh = shuffle90(pool.filter(function (id) { return !oldSet.has(id); }));
+        if (fresh.length && oldCards.length) {
+          const next = oldCards.slice(0, count);
+          const idx = Math.floor(Math.random() * Math.max(1, Math.min(count, next.length)));
+          next[idx] = fresh[0];
+          const used = new Set(next);
+          for (const id of shuffle90(pool)) {
+            if (next.length >= count) break;
+            if (!used.has(id)) { next.push(id); used.add(id); }
+          }
+          if (key90(next) !== oldKey) return next.slice(0, count);
+        }
+      } catch (e) { log90(e, 'chooseDifferent'); }
+      return oldCards;
+    }
+    function rerollDraft90(source) {
+      try {
+        if (!activeDraft90() || !state.player) { sys.stats.rerollDenied += 1; return false; }
+        const d = state.draft, p = state.player;
+        const cost = rerollCost90(), stars = stars90();
+        if (stars < cost) {
+          sys.stats.rerollDenied += 1;
+          try { if (typeof pushMessage === 'function') pushMessage('Need ' + (cost - stars) + ' more ★ to reroll', '#dac7ff', 14, 1.0, 0.18); } catch (_) {}
+          try { if (typeof renderDraftUI === 'function') renderDraftUI(true); } catch (_) {}
+          return false;
+        }
+        const old = d.cards.slice();
+        const count = Math.max(3, Math.min(4, old.length || 3));
+        const next = chooseDifferent90(count, old);
+        if (!Array.isArray(next) || !next.length || key90(next) === key90(old)) {
+          sys.stats.rerollDenied += 1;
+          try { if (typeof pushMessage === 'function') pushMessage('The graft pool refused to change', '#dac7ff', 14, 1.0, 0.18); } catch (_) {}
+          return false;
+        }
+        p.moonSplinters = Math.max(0, stars - cost);
+        d.cards = next.slice(0, count);
+        d._v76StarRerolls = Math.floor(N90(d._v76StarRerolls)) + 1;
+        d.renderKey = '';
+        d.hover = -1;
+        sys.stats.rerollSuccesses += 1;
+        try {
+          if (typeof spawnRing === 'function' && p.x != null) spawnRing(p.x, p.y, '#d9d4ff', 64);
+          if (typeof spawnSpark === 'function' && p.x != null) spawnSpark(p.x, p.y, '#f3dcff', 12, 145);
+          if (typeof playToneBurst === 'function') playToneBurst({ type: 'sine', startFreq: 520, endFreq: 760, duration: 0.22, gain: 0.05, filterFreq: 2200 });
+          if (typeof pushMessage === 'function') pushMessage('The graft cards turn over', '#d9d4ff', 16, 1.05, 0.14);
+        } catch (_) {}
+        try { if (typeof renderDraftUI === 'function') renderDraftUI(true); } catch (_) {}
+        try { const el = document.getElementById('v76StarTrade'); if (el) { el.classList.remove('v78Spent', 'v84Spent'); void el.offsetWidth; el.classList.add('v84Spent'); } } catch (_) {}
+        return true;
+      } catch (e) { log90(e, 'rerollDraft'); return false; }
+    }
+    function rerollButton90(ev) {
+      try {
+        const t = ev && ev.target;
+        return t && t.closest && t.closest('#v90RerollBtn,#v84RerollBtn,#v78RerollBtn,[data-v90-star-action="reroll"],[data-v84-star-action="reroll"],[data-v76-star-action="reroll"],[data-v57-action="reroll"]');
+      } catch (_) { return null; }
+    }
+    function handleReroll90(ev) {
+      const btn = rerollButton90(ev);
+      if (!btn) return;
+      try { ev.preventDefault(); ev.stopPropagation(); if (ev.stopImmediatePropagation) ev.stopImmediatePropagation(); } catch (_) {}
+      const now = NOW90();
+      if (ev.type === 'click' && state._v90LastRerollInputAt && now - state._v90LastRerollInputAt < 420) return false;
+      state._v90LastRerollInputAt = now;
+      sys.stats.rerollInputs += 1;
+      rerollDraft90(ev.type || 'input');
+      return false;
+    }
+
+    // -----------------------------------------------------------------
+    // Bullet normalization: one guard layer only. It fixes radius/r, finite
+    // movement fields, and marks boss-source hazards before Black Anchor slow
+    // logic can mistake them for ordinary bullets.
+    // -----------------------------------------------------------------
+    function enemyId90(e) { return String((e && (e.typeId || e.behavior || e.id || e.kind || e.name)) || ''); }
+    function livingEnemy90(e) { return !!(e && !e.remove && !e.dead && N90(e.hp, 1) > 0); }
+    function majorBossEnemy90(e) {
+      try {
+        if (!e) return false;
+        if (e.boss === true || e.majorBoss === true || e.isBoss === true) return true;
+        if (MAJOR_BOSS_RE90.test(enemyId90(e))) return true;
+        if (typeof state.v77IsMajorBoss === 'function' && state.v77IsMajorBoss(e)) return true;
+      } catch (_) {}
+      return false;
+    }
+    function majorBossAlive90() {
+      try {
+        const seen = [];
+        if (Array.isArray(state.enemies)) seen.push.apply(seen, state.enemies);
+        const room = currentRoom90();
+        if (room && Array.isArray(room.enemies)) seen.push.apply(seen, room.enemies);
+        return seen.some(function (e) { return livingEnemy90(e) && majorBossEnemy90(e); });
+      } catch (_) { return false; }
+    }
+    function normalizeBullet90(b, bossAlive) {
+      try {
+        if (!b || typeof b !== 'object') return b;
+        let changed = false, finiteChanged = false;
+        const radius = FIN90(b.r) && Number(b.r) > 0 ? Number(b.r) : (FIN90(b.radius) && Number(b.radius) > 0 ? Number(b.radius) : 4);
+        if (!FIN90(b.r) || Number(b.r) <= 0) { b.r = radius; changed = true; }
+        if (!FIN90(b.radius) || Number(b.radius) <= 0) { b.radius = radius; changed = true; }
+        if (!FIN90(b.x)) { b.x = FIN90(b.px) ? Number(b.px) : 0; finiteChanged = true; }
+        if (!FIN90(b.y)) { b.y = FIN90(b.py) ? Number(b.py) : 0; finiteChanged = true; }
+        if (!FIN90(b.px)) { b.px = Number(b.x); finiteChanged = true; }
+        if (!FIN90(b.py)) { b.py = Number(b.y); finiteChanged = true; }
+        if (!FIN90(b.vx)) { b.vx = 0; finiteChanged = true; }
+        if (!FIN90(b.vy)) { b.vy = 0; finiteChanged = true; }
+        if (!FIN90(b.life)) { b.life = 1; finiteChanged = true; }
+        if (!FIN90(b.damage)) { b.damage = 1; finiteChanged = true; }
+        if (!FIN90(b.pierce)) { b.pierce = 0; finiteChanged = true; }
+        if (changed || finiteChanged) sys.stats.bulletsNormalized += 1;
+        if (finiteChanged) sys.stats.bulletFiniteRepairs += 1;
+
+        if (b.owner === 'enemy') {
+          const src = String(b.sourceEnemyType || b.enemyType || b.sourceType || b.source || b.kind || '');
+          const color = String(b.color || '');
+          const bossish = MAJOR_BOSS_RE90.test(src) || !!(b.bossBeam || b.sunRay || b.majorHazard || b.bossSource || b.sourceBoss);
+          const waterySunRay = !src && /#bde7ff|#a89bff|#ffe08a|#ff9a7b/i.test(color) && N90(b.life) >= 1.2 && N90(b.damage) >= 1;
+          const likelyBossHazard = !!bossAlive && (bossish || waterySunRay || (!src && N90(b.life) >= 1.5 && N90(b.damage) >= 1 && POS90(b.r, 0) >= 3));
+          if (bossish || waterySunRay || likelyBossHazard) {
+            const had = !!(b.bossSource && b.sourceBoss && b.majorHazard);
+            b.bossSource = true;
+            b.sourceBoss = true;
+            b.majorHazard = true;
+            if (/sun|drowned/i.test(src) || waterySunRay) b.sunRay = true;
+            if (!had) sys.stats.bossBulletsTagged += 1;
+          }
+        }
+        return b;
+      } catch (e) { log90(e, 'normalizeBullet'); return b; }
+    }
+    function guardBulletArray90() {
+      try {
+        const arr = state.bullets;
+        if (!Array.isArray(arr)) return false;
+        const bossAlive = majorBossAlive90();
+        for (const b of arr) normalizeBullet90(b, bossAlive);
+        if (arr.__v90BulletGuard) return true;
+        if (typeof arr.push !== 'function') return false;
+        if (typeof Object.isExtensible === 'function' && !Object.isExtensible(arr)) return false;
+        const basePush = arr.push;
+        arr.push = function pushV90() {
+          const alive = majorBossAlive90();
+          for (let i = 0; i < arguments.length; i++) normalizeBullet90(arguments[i], alive);
+          return basePush.apply(this, arguments);
+        };
+        try { Object.defineProperty(arr, '__v90BulletGuard', { value: true, configurable: true }); } catch (_) { try { arr.__v90BulletGuard = true; } catch (_) {} }
+        try { Object.defineProperty(arr, '__v90BasePush', { value: basePush, configurable: true }); } catch (_) {}
+        sys.stats.bulletArraysGuarded += 1;
+        return true;
+      } catch (e) { log90(e, 'guardBulletArray'); return false; }
+    }
+
+    // -----------------------------------------------------------------
+    // Custom victory and active-charge convergence.
+    // -----------------------------------------------------------------
+    function isCustomVictoryRoom90(room) {
+      try {
+        if (!room) return false;
+        const id = String(room._v77MajorBossId || '');
+        return id === 'sunCore'
+          || /DrownedSun/i.test(id)
+          || !!(room._v39SunDefeated || room._v77SunCrater || room._v77SunReturnSigil || room._v79ColdLantern || room._v80ColdLantern)
+          || !!((room._v79DrownedSky || room._v80DrownedSky) && (room.hasBoss || room._v79RoomKind === 'boss' || room._v80RoomKind === 'boss'));
+      } catch (_) { return false; }
+    }
+    function closeCustomVictoryExit90(room) {
+      try {
+        if (!room || !isCustomVictoryRoom90(room) || !room.exit || !room.exit.active) return false;
+        room.exit.active = false;
+        room._v90CustomVictoryExitReclosed = true;
+        sys.stats.customVictoryExitsReclosed += 1;
+        return true;
+      } catch (e) { log90(e, 'closeCustomVictoryExit'); return false; }
+    }
+    function creditNadirOrMoots90(amount) {
+      try {
+        const p = state.player;
+        if (!p || !p.template) return false;
+        let credited = false;
+        if (p.template.id === 'nadir' && state.v82BlackAnchor && state.v82BlackAnchor.anchor) {
+          const a = state.v82BlackAnchor.anchor, cfg = state.v82BlackAnchor.config || {};
+          const max = Math.max(1, N90(a.maxCharges, 1));
+          if (N90(a.charges) < max) {
+            a.roomProgress = N90(a.roomProgress) + amount;
+            if (a.roomProgress >= Math.max(1, N90(cfg.ROOM_NEED, 3))) { a.roomProgress = 0; a.charges = max; try { if (typeof pushMessage === 'function') pushMessage('Black Anchor relaced', '#8fdcff', 16, 1.1, 0.16); } catch (_) {} }
+            credited = true;
+          }
+        }
+        if (p.template.id === 'moots' && state.v68BoonMootsCareerAudio && state.v68BoonMootsCareerAudio.boon) {
+          const b = state.v68BoonMootsCareerAudio.boon;
+          const maxB = Math.max(1, N90(b.maxCharges, 1));
+          if (N90(b.charges) < maxB) {
+            b.roomProgress = N90(b.roomProgress) + amount;
+            if (b.roomProgress >= Math.max(1, N90(b.roomNeed, 3))) { b.roomProgress = 0; b.charges = maxB; try { if (typeof pushMessage === 'function') pushMessage('Boon Moots relaced', '#f3dcff', 16, 1.1, 0.16); } catch (_) {} }
+            credited = true;
+          }
+        }
+        return credited;
+      } catch (e) { log90(e, 'creditNadirOrMoots'); return false; }
+    }
+    function chargeCustomDrownedClear90(room) {
+      try {
+        if (!room || !room.cleared || room._v90CustomDrownedClearCharged) return false;
+        if (!(room._v79DrownedSky || room._v80DrownedSky)) return false;
+        if (room._v85CustomClearCharged || room._v87CustomDrownedClearCharged) { room._v90CustomDrownedClearCharged = true; return false; }
+        const amount = (room.hasBoss || room._v79ColdLantern || room._v80ColdLantern || room._v79RoomKind === 'boss' || room._v80RoomKind === 'boss') ? 3 : 1;
+        const credited = creditNadirOrMoots90(amount);
+        room._v90CustomDrownedClearCharged = true;
+        if (credited) sys.stats.customClearCharges += 1;
+        return credited;
+      } catch (e) { log90(e, 'chargeCustomDrownedClear'); return false; }
+    }
+
+    // Touch aim repair keeps Nadir's active and normal aim direction aligned on
+    // mobile without touching title/menu state.
+    function repairTouchAim90() {
+      try {
+        if (state.mode !== 'play' || !state.player || typeof input === 'undefined' || !input || !input.aimTouch || input.aimTouch.id === null) return false;
+        const dx = N90(input.aimTouch.dx), dy = N90(input.aimTouch.dy);
+        const len = Math.hypot(dx, dy);
+        if (len <= 0.18) return false;
+        const next = Math.atan2(dy, dx);
+        if (Number.isFinite(next) && Math.abs(N90(state.player.aimAngle) - next) > 0.0001) {
+          state.player.aimAngle = next;
+          sys.stats.touchAimRepairs += 1;
+          return true;
+        }
+      } catch (e) { log90(e, 'repairTouchAim'); }
+      return false;
+    }
+
+    // Conservative Moots scrub, matching the strict v78/v86 evidence chain and
+    // avoiding deepest-floor false unlocks.
+    function strictMoots90(obj) {
+      try {
+        const s = obj || {}, lt = s.lifetime || {}, v = s.victories || {}, ach = s.achievements || {};
+        return N90(lt.wins) > 0 || N90(v.routeClears) > 0 || !!(ach.wins_1 && ach.wins_1.unlocked);
+      } catch (_) { return false; }
+    }
+    function scrubMoots90() {
+      try {
+        const s = state.save || {}, m = readJson90(MIRROR90);
+        const strict = strictMoots90(s) || strictMoots90(m);
+        if (strict) return false;
+        let changed = false;
+        if (s.unlockedCharacters && s.unlockedCharacters.moots) { s.unlockedCharacters.moots = false; changed = true; }
+        if (m.unlockedCharacters && m.unlockedCharacters.moots) { m.unlockedCharacters.moots = false; writeJson90(MIRROR90, m); changed = true; }
+        if (changed) { try { writeJson90(SAVE90, state.save); } catch (_) {}; sys.stats.mootsScrubs += 1; }
+        return changed;
+      } catch (e) { log90(e, 'scrubMoots'); return false; }
+    }
+
+    // -----------------------------------------------------------------
+    // Wrappers. Installed after v89, so they are the outermost and can pause
+    // old observers before older render/open wrappers mutate the Codex.
+    // -----------------------------------------------------------------
+    try {
+      disconnectLegacyCodexObservers90();
+      if (typeof renderCodexStats === 'function' && !renderCodexStats.__v90CodexSafe) {
+        const baseRenderCodexStats90 = renderCodexStats;
+        renderCodexStats = function renderCodexStatsV90() {
+          disconnectLegacyCodexObservers90();
+          pauseCodexObserver90();
+          let out;
+          try { out = baseRenderCodexStats90.apply(this, arguments); }
+          finally { try { repairCodex90('renderCodexStats'); } catch (e) { log90(e, 'renderCodexStats'); } }
+          return out;
+        };
+        renderCodexStats.__v90CodexSafe = true;
+      }
+      if (typeof openCodex === 'function' && !openCodex.__v90CodexSafe) {
+        const baseOpenCodex90 = openCodex;
+        openCodex = function openCodexV90() {
+          disconnectLegacyCodexObservers90();
+          pauseCodexObserver90();
+          let out;
+          try { out = baseOpenCodex90.apply(this, arguments); }
+          finally { try { repairCodex90('openCodex'); } catch (e) { log90(e, 'openCodex'); } }
+          return out;
+        };
+        openCodex.__v90CodexSafe = true;
+      }
+      if (typeof document !== 'undefined' && !document.__v90RerollRescue) {
+        document.addEventListener('pointerdown', handleReroll90, { capture: true, passive: false });
+        document.addEventListener('click', handleReroll90, { capture: true, passive: false });
+        document.__v90RerollRescue = true;
+      }
+      if (typeof createBullet === 'function' && !createBullet.__v90SafeConvergence) {
+        const baseCreateBullet90 = createBullet;
+        createBullet = function createBulletV90(options) {
+          const before = Array.isArray(state.bullets) ? state.bullets.length : -1;
+          const out = baseCreateBullet90.apply(this, arguments);
+          try {
+            guardBulletArray90();
+            const alive = majorBossAlive90();
+            if (out && typeof out === 'object') normalizeBullet90(out, alive);
+            if (Array.isArray(state.bullets) && before >= 0) {
+              for (let i = before; i < state.bullets.length; i++) normalizeBullet90(state.bullets[i], alive);
+            }
+          } catch (e) { log90(e, 'createBullet'); }
+          return out;
+        };
+        createBullet.__v90SafeConvergence = true;
+        sys.stats.createBulletWraps += 1;
+      }
+      if (typeof setRoomCleared === 'function' && !setRoomCleared.__v90CustomVictoryGuard) {
+        const baseSetRoomCleared90 = setRoomCleared;
+        setRoomCleared = function setRoomClearedV90(level, room) {
+          try {
+            if (room && room._v77MajorBossDefeated && isCustomVictoryRoom90(room) && !room._v90AllowStandardClear) {
+              const wasCleared = !!room.cleared;
+              room.cleared = true;
+              if (level) level.cleared = true;
+              if (level && level.currentRoom === room) {
+                level.enemies = room.enemies || [];
+                level.hazards = room.hazards || [];
+                level.traps = room.traps || [];
+                state.enemies = level.enemies;
+                state.hazards = level.hazards;
+                state.traps = level.traps;
+              }
+              room._v90CustomVictorySetRoomBypassed = true;
+              closeCustomVictoryExit90(room);
+              chargeCustomDrownedClear90(room);
+              if (!wasCleared) sys.stats.customVictoryClearBypasses += 1;
+              return room;
+            }
+          } catch (e) { log90(e, 'setRoomCleared guard'); }
+          return baseSetRoomCleared90.apply(this, arguments);
+        };
+        setRoomCleared.__v90CustomVictoryGuard = true;
+      }
+      if (typeof updateGame === 'function' && !updateGame.__v90SafeConvergence) {
+        const baseUpdateGame90 = updateGame;
+        updateGame = function updateGameV90(dt) {
+          try { repairTouchAim90(); guardBulletArray90(); } catch (e) { log90(e, 'preUpdate'); }
+          const out = baseUpdateGame90.apply(this, arguments);
+          try {
+            const room = currentRoom90();
+            if (room) { closeCustomVictoryExit90(room); chargeCustomDrownedClear90(room); }
+            guardBulletArray90();
+          } catch (e) { log90(e, 'postUpdate'); }
+          return out;
+        };
+        updateGame.__v90SafeConvergence = true;
+      }
+      if (typeof safeWriteSave === 'function' && !safeWriteSave.__v90MootsScrub) {
+        const baseSafeWrite90 = safeWriteSave;
+        safeWriteSave = function safeWriteSaveV90() {
+          try { scrubMoots90(); } catch (_) {}
+          const out = baseSafeWrite90.apply(this, arguments);
+          try { scrubMoots90(); } catch (_) {}
+          return out;
+        };
+        safeWriteSave.__v90MootsScrub = true;
+      }
+      if (typeof renderCharacterCards === 'function' && !renderCharacterCards.__v90MootsScrub) {
+        const baseRenderCharacterCards90 = renderCharacterCards;
+        renderCharacterCards = function renderCharacterCardsV90() {
+          try { scrubMoots90(); } catch (_) {}
+          return baseRenderCharacterCards90.apply(this, arguments);
+        };
+        renderCharacterCards.__v90MootsScrub = true;
+      }
+    } catch (e) { log90(e, 'wrappers'); }
+
+    state.v90Reroll = rerollDraft90;
+    state.v90Debug = function v90Debug() {
+      const room = currentRoom90();
+      tag90();
+      return {
+        version: V90_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE90,
+        basedOn: sys.basedOn,
+        mode: state.mode,
+        room: room ? {
+          id: room.id,
+          kind: room.kind,
+          cleared: !!room.cleared,
+          exitActive: !!(room.exit && room.exit.active),
+          drownedSky: !!(room._v79DrownedSky || room._v80DrownedSky),
+          customVictory: isCustomVictoryRoom90(room),
+          customDrownedCharged: !!(room._v90CustomDrownedClearCharged || room._v85CustomClearCharged || room._v87CustomDrownedClearCharged)
+        } : null,
+        bullets: Array.isArray(state.bullets) ? { count: state.bullets.length, guarded: !!state.bullets.__v90BulletGuard } : null,
+        codexObserver: !!codexObserver90,
+        legacyV85ObserverDisconnected: !!(codexTarget90() && codexTarget90().__v85DrownedSunObserver && codexTarget90().__v85DrownedSunObserver.__v90Disconnected),
+        majorBossAlive: majorBossAlive90(),
+        stats: Object.assign({}, sys.stats),
+        v89: typeof state.v89Debug === 'function' ? state.v89Debug() : null,
+        v85: typeof state.v85Debug === 'function' ? state.v85Debug() : null
+      };
+    };
+
+    state.v90SelfTest = function v90SelfTest() {
+      const out = { version: V90_VERSION };
+      const run = function (name, fn) {
+        try { out[name] = fn(); }
+        catch (e) { out[name] = { ok: false, error: String(e && (e.message || e)) }; }
+      };
+      sys.stats.selfTestsRun += 1;
+      run('boot', function () {
+        const d = state.v90Debug();
+        return { ok: d.buildTag === V90_VERSION && d.cacheExpected === CACHE90, mode: d.mode, guarded: !!(d.bullets && d.bullets.guarded) };
+      });
+      run('bulletFinite', function () {
+        const b = { owner: 'enemy', x: NaN, y: 7, vx: NaN, vy: 2, radius: 5, life: NaN, damage: NaN, sourceEnemyType: 'v80DrownedSun', color: '#bde7ff' };
+        normalizeBullet90(b, true);
+        const finite = [b.x, b.y, b.vx, b.vy, b.r, b.radius, b.life, b.damage, b.px, b.py].every(function (v) { return Number.isFinite(Number(v)); });
+        return { ok: finite && b.r === 5 && b.radius === 5 && b.bossSource && b.sourceBoss && b.majorHazard && b.sunRay, bullet: b };
+      });
+      run('pushGuard', function () {
+        if (!Array.isArray(state.bullets)) return { ok: false, reason: 'no bullets array' };
+        const oldLen = state.bullets.length;
+        guardBulletArray90();
+        state.bullets.push({ owner: 'enemy', x: 1, y: 2, vx: NaN, vy: NaN, radius: 6, sourceEnemyType: 'graveWarden' });
+        const b = state.bullets[state.bullets.length - 1];
+        const ok = !!(b && b.r === 6 && b.radius === 6 && Number.isFinite(Number(b.vx)) && b.bossSource);
+        state.bullets.splice(oldLen);
+        return { ok: ok, guarded: !!state.bullets.__v90BulletGuard };
+      });
+      run('codex', function () {
+        state.save = state.save || {};
+        state.save.defeatedBosses = state.save.defeatedBosses || {};
+        state.save.defeatedBosses.drownedSun = true;
+        try { if (typeof openCodex === 'function') openCodex(); } catch (_) {}
+        try { if (typeof renderCodexStats === 'function') renderCodexStats(); } catch (_) {}
+        repairCodex90('selftest');
+        const target = codexTarget90();
+        const deck = target && target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector('.v71BossGrid');
+        const countEl = deck && deck.querySelector('.v71BossDeckCount');
+        const cards = grid ? grid.querySelectorAll('.v71BossCard').length : 0;
+        const drowned = grid ? grid.querySelectorAll('[data-v90-boss="drownedSun"]').length : 0;
+        return { ok: !!(cards >= 7 && drowned === 1), cards: cards, drowned: drowned, text: countEl ? countEl.textContent : '' };
+      });
+      run('rerollChooser', function () {
+        const pool = availablePool90();
+        if (pool.length < 4) return { ok: true, skipped: true, pool: pool.length };
+        const old = pool.slice(0, Math.min(4, pool.length));
+        const next = chooseDifferent90(old.length, old);
+        return { ok: Array.isArray(next) && next.length === old.length && key90(next) !== key90(old), before: old, after: next };
+      });
+      out.ok = Object.keys(out).filter(function (k) { return k !== 'version' && k !== 'ok'; }).every(function (k) { return out[k] && out[k].ok !== false; });
+      tag90();
+      return out;
+    };
+
+    try {
+      scrubMoots90();
+      guardBulletArray90();
+      disconnectLegacyCodexObservers90();
+      repairCodex90('install');
+      tag90();
+      setTimeout(function () { try { disconnectLegacyCodexObservers90(); guardBulletArray90(); repairCodex90('timeout0'); tag90(); } catch (_) {} }, 0);
+      setTimeout(function () { try { disconnectLegacyCodexObservers90(); guardBulletArray90(); tag90(); } catch (_) {} }, 500);
+      setTimeout(function () { try { disconnectLegacyCodexObservers90(); guardBulletArray90(); tag90(); } catch (_) {} }, 1600);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V90_SAFE_CONVERGENCE__ = sys;
+        window.noMoonV90Debug = function () { return state.v90Debug(); };
+        window.noMoonV90SelfTest = function () { return state.v90SelfTest(); };
+        window.noMoonV90Reroll = function () { return rerollDraft90('console'); };
+        window.noMoonV90RepairCodex = function () { return repairCodex90('console'); };
+      }
+    } catch (e) { log90(e, 'install'); }
+    state.buildTag = V90_VERSION;
+  })();
+
+
+  // ===================================================================
+  // === v91 — Claude-reconciled stable totality finalizer ==============
+  // ===================================================================
+  // v91 keeps the stable v90 convergence build, then makes the final pass
+  // authoritative: it owns Codex repair with one paused observer, disables
+  // all older Codex observers including v90's, and retags after old debug /
+  // overlay wrappers that can still stamp v75/v84/v89 while reporting state.
+  (function installV91ClaudeReconciledStableTotality() {
+    const V91_VERSION = 'qual.claude-reconciled-stable-totality.2026-05-13.v91';
+    const CACHE91 = 'no-moon-claude-reconciled-stable-totality-v91';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v91ClaudeReconciledStableTotality && state.v91ClaudeReconciledStableTotality.installed) return;
+
+    const sys = state.v91ClaudeReconciledStableTotality = {
+      installed: true,
+      version: V91_VERSION,
+      cacheExpected: CACHE91,
+      basedOn: 'Claude v89 recovery + v90 safe convergence; v91 owns final Codex observer, cache, and debug stamping.',
+      stats: {
+        buildTagsStamped: 0,
+        legacyObserversDisabled: 0,
+        codexChecks: 0,
+        codexWrites: 0,
+        codexDuplicatesRemoved: 0,
+        codexObserverEvents: 0,
+        codexSchedules: 0,
+        debugRetags: 0,
+        selfTestsRun: 0,
+        lastError: null
+      }
+    };
+
+    const N91 = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
+    const SAVE91 = (typeof SAVE_KEY !== 'undefined' && SAVE_KEY) ? SAVE_KEY : 'noMoonSave_v1';
+    const MIRROR91 = 'noMoonProgress_v68';
+    let codexObserver91 = null;
+    let codexPaused91 = false;
+    let codexScheduled91 = false;
+    let lastVisibleCodexRepair91 = 0;
+
+    function log91(e, where) {
+      try {
+        const msg = (where || 'v91') + ': ' + (e && (e.message || String(e)) || 'unknown');
+        sys.stats.lastError = msg;
+        console.warn('[No Moon v91]', msg, e);
+      } catch (_) {}
+    }
+
+    function tag91() {
+      try {
+        let changed = false;
+        if (state.buildTag !== V91_VERSION) { state.buildTag = V91_VERSION; changed = true; }
+        if (typeof document !== 'undefined') {
+          const desired = 'build: ' + V91_VERSION;
+          const tag = document.getElementById('buildTagDisplay');
+          if (tag && tag.textContent !== desired) { tag.textContent = desired; changed = true; }
+          if (document.documentElement && document.documentElement.dataset.noMoonBuild !== V91_VERSION) {
+            document.documentElement.dataset.noMoonBuild = V91_VERSION;
+            changed = true;
+          }
+        }
+        if (changed) sys.stats.buildTagsStamped += 1;
+      } catch (_) {}
+    }
+
+    function readJson91(key) { try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (_) { return {}; } }
+    function target91() { try { return (typeof codexOverlay !== 'undefined' && codexOverlay && codexOverlay.querySelector) ? codexOverlay : null; } catch (_) { return null; } }
+
+    function disableOlderCodexObservers91() {
+      try {
+        const target = target91();
+        if (!target) return 0;
+        let disabled = 0;
+        ['__v85DrownedSunObserver', '__v86CodexObserver', '__v87CodexObserver', '__v88CodexObserver', '__v90CodexObserver'].forEach(function (key) {
+          try {
+            const obs = target[key];
+            if (obs && !obs.__v91Disabled) {
+              if (typeof obs.takeRecords === 'function') { try { obs.takeRecords(); } catch (_) {} }
+              if (typeof obs.disconnect === 'function') { try { obs.disconnect(); disabled += 1; } catch (_) {} }
+              try { obs.__v91Disabled = true; } catch (_) {}
+              try { target[key] = { __v91Disabled: true }; } catch (_) {}
+            }
+          } catch (_) {}
+        });
+        // Prevent a queued v85 observer callback from scheduling another v85
+        // remove/append cycle after this script finishes.
+        try { state._v85CodexRepairScheduled = true; } catch (_) {}
+        if (disabled) sys.stats.legacyObserversDisabled += disabled;
+        return disabled;
+      } catch (e) { log91(e, 'disableOlderCodexObservers'); return 0; }
+    }
+
+    function drownedSunRevealed91() {
+      try {
+        const s = state.save || {};
+        const mirrors = [readJson91(MIRROR91), readJson91(SAVE91)];
+        const check = function (obj) {
+          obj = obj || {};
+          const d = obj.defeatedBosses || {}, v = obj.victories || {};
+          return !!(d.drownedSun || d.v80DrownedSun || d.v79DrownedSun ||
+            N91(v.drownedSkyClears) > 0 || N91(v.drownedSunClears) > 0 ||
+            N91(v.drownedSky) > 0 || N91(v.drownedSun) > 0);
+        };
+        return check(s) || mirrors.some(check) || !!(state._v80DrownedSunDefeated || state._v81DrownedSunDefeated);
+      } catch (_) { return false; }
+    }
+
+    function pause91() {
+      try {
+        if (codexObserver91 && !codexPaused91) {
+          if (typeof codexObserver91.takeRecords === 'function') codexObserver91.takeRecords();
+          codexObserver91.disconnect();
+          codexPaused91 = true;
+        }
+      } catch (_) {}
+    }
+    function resume91() {
+      try {
+        const target = target91();
+        if (codexObserver91 && target && codexPaused91) {
+          codexObserver91.observe(target, { childList: true, subtree: true });
+          codexPaused91 = false;
+        }
+      } catch (_) {}
+    }
+    function scheduleCodex91(reason) {
+      try {
+        if (codexScheduled91) return false;
+        codexScheduled91 = true;
+        sys.stats.codexSchedules += 1;
+        setTimeout(function () {
+          codexScheduled91 = false;
+          try { repairCodex91(reason || 'scheduled'); } catch (e) { log91(e, 'scheduledCodex'); }
+        }, 60);
+        return true;
+      } catch (e) { log91(e, 'scheduleCodex'); return false; }
+    }
+
+    function setAttr91(el, name, value) {
+      try { if (el && el.getAttribute(name) !== String(value)) { el.setAttribute(name, String(value)); return true; } } catch (_) {}
+      return false;
+    }
+    function setData91(el, key, value) {
+      try { if (el && el.dataset && el.dataset[key] !== String(value)) { el.dataset[key] = String(value); return true; } } catch (_) {}
+      return false;
+    }
+    function delData91(el, key) {
+      try { if (el && el.dataset && Object.prototype.hasOwnProperty.call(el.dataset, key)) { delete el.dataset[key]; return true; } } catch (_) {}
+      return false;
+    }
+
+    function repairCodex91(reason) {
+      let changed = false;
+      try {
+        disableOlderCodexObservers91();
+        sys.stats.codexChecks += 1;
+        const target = target91();
+        if (!target) return false;
+        const deck = target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector ? deck.querySelector('.v71BossGrid') : null;
+        if (!deck || !grid) return false;
+        pause91();
+        const revealed = drownedSunRevealed91();
+        const selector = '[data-v81-boss="drownedSun"],[data-v85-boss="drownedSun"],[data-v86-boss="drownedSun"],[data-v87-boss="drownedSun"],[data-v88-boss="drownedSun"],[data-v90-boss="drownedSun"],[data-v91-boss="drownedSun"],[data-v92-boss="drownedSun"]';
+        const found = Array.from(grid.querySelectorAll(selector));
+        let card = found.find(function (el) { return el && el.dataset && el.dataset.v91Boss === 'drownedSun'; }) || found.find(function (el) { return el && el.dataset && el.dataset.v90Boss === 'drownedSun'; }) || found[0] || null;
+        for (const el of found) {
+          if (el !== card) { try { el.remove(); changed = true; sys.stats.codexDuplicatesRemoved += 1; } catch (_) {} }
+        }
+        if (!card) {
+          card = document.createElement('button');
+          card.type = 'button';
+          grid.appendChild(card);
+          changed = true;
+        } else if (card.parentNode !== grid) {
+          grid.appendChild(card);
+          changed = true;
+        }
+        if (card.type !== 'button') { try { card.type = 'button'; changed = true; } catch (_) {} }
+        changed = setData91(card, 'v91Boss', 'drownedSun') || changed;
+        // Keep v91 as the canonical marker so old v85 repair does not remove
+        // this card on its remaining scheduled callbacks.
+        changed = delData91(card, 'v81Boss') || changed;
+        changed = delData91(card, 'v85Boss') || changed;
+        changed = delData91(card, 'v86Boss') || changed;
+        changed = delData91(card, 'v87Boss') || changed;
+        changed = delData91(card, 'v88Boss') || changed;
+        changed = delData91(card, 'v90Boss') || changed;
+        const desiredClass = revealed ? 'v71BossCard revealed' : 'v71BossCard locked';
+        if (card.className !== desiredClass) { card.className = desiredClass; changed = true; }
+        changed = setAttr91(card, 'aria-label', revealed ? 'Drowned Sun defeated' : 'Sealed defeated-boss card') || changed;
+        const desiredHtml = revealed
+          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
+          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
+        if (card.innerHTML !== desiredHtml) { card.innerHTML = desiredHtml; changed = true; }
+        const cards = Array.from(grid.querySelectorAll('.v71BossCard'));
+        const isDrowned = function (el) { return !!(el && el.dataset && (el.dataset.v81Boss === 'drownedSun' || el.dataset.v85Boss === 'drownedSun' || el.dataset.v86Boss === 'drownedSun' || el.dataset.v87Boss === 'drownedSun' || el.dataset.v88Boss === 'drownedSun' || el.dataset.v90Boss === 'drownedSun' || el.dataset.v91Boss === 'drownedSun')); };
+        const baseCards = cards.filter(function (el) { return !isDrowned(el); });
+        const baseRevealed = baseCards.filter(function (el) { return el.classList && el.classList.contains('revealed'); }).length;
+        const countEl = deck.querySelector('.v71BossDeckCount');
+        if (countEl) {
+          const txt = (baseRevealed + (revealed ? 1 : 0)) + '/' + (baseCards.length + 1) + ' revealed';
+          if (countEl.textContent !== txt) { countEl.textContent = txt; changed = true; }
+        }
+        if (changed) sys.stats.codexWrites += 1;
+        return changed;
+      } catch (e) { log91(e, 'repairCodex ' + (reason || '')); return false; }
+      finally { resume91(); }
+    }
+
+    function installObserver91() {
+      try {
+        const target = target91();
+        if (!target || typeof MutationObserver === 'undefined' || codexObserver91) return false;
+        codexObserver91 = new MutationObserver(function () {
+          if (codexPaused91 || codexScheduled91) return;
+          sys.stats.codexObserverEvents += 1;
+          scheduleCodex91('observer');
+        });
+        codexPaused91 = true;
+        resume91();
+        target.__v91CodexObserver = codexObserver91;
+        return true;
+      } catch (e) { log91(e, 'installObserver'); return false; }
+    }
+
+    function wrapAndRetag91(name) {
+      try {
+        if (!state || typeof state[name] !== 'function' || state[name].__v91Retagged) return;
+        const base = state[name];
+        state[name] = function v91RetaggedDebug() {
+          const out = base.apply(this, arguments);
+          try { tag91(); sys.stats.debugRetags += 1; } catch (_) {}
+          return out;
+        };
+        state[name].__v91Retagged = true;
+      } catch (_) {}
+    }
+
+    if (typeof renderCodexStats === 'function' && !renderCodexStats.__v91CodexFinal) {
+      const baseRenderCodexStats91 = renderCodexStats;
+      renderCodexStats = function renderCodexStatsV91() {
+        const out = baseRenderCodexStats91.apply(this, arguments);
+        try { repairCodex91('renderCodexStats'); installObserver91(); tag91(); } catch (_) {}
+        return out;
+      };
+      renderCodexStats.__v91CodexFinal = true;
+    }
+    if (typeof openCodex === 'function' && !openCodex.__v91CodexFinal) {
+      const baseOpenCodex91 = openCodex;
+      openCodex = function openCodexV91() {
+        const out = baseOpenCodex91.apply(this, arguments);
+        try { repairCodex91('openCodex'); installObserver91(); tag91(); } catch (_) {}
+        return out;
+      };
+      openCodex.__v91CodexFinal = true;
+    }
+    if (typeof showOverlay === 'function' && !showOverlay.__v91Tag) {
+      const baseShowOverlay91 = showOverlay;
+      showOverlay = function showOverlayV91() {
+        const out = baseShowOverlay91.apply(this, arguments);
+        try { tag91(); setTimeout(tag91, 0); setTimeout(tag91, 120); } catch (_) {}
+        return out;
+      };
+      showOverlay.__v91Tag = true;
+    }
+    if (typeof updateOverlay === 'function' && !updateOverlay.__v91Tag) {
+      const baseUpdateOverlay91 = updateOverlay;
+      updateOverlay = function updateOverlayV91() {
+        const out = baseUpdateOverlay91.apply(this, arguments);
+        try { tag91(); } catch (_) {}
+        return out;
+      };
+      updateOverlay.__v91Tag = true;
+    }
+    if (typeof hideOverlay === 'function' && !hideOverlay.__v91Tag) {
+      const baseHideOverlay91 = hideOverlay;
+      hideOverlay = function hideOverlayV91() {
+        const out = baseHideOverlay91.apply(this, arguments);
+        try { tag91(); } catch (_) {}
+        return out;
+      };
+      hideOverlay.__v91Tag = true;
+    }
+    if (typeof startGame === 'function' && !startGame.__v91Tag) {
+      const baseStartGame91 = startGame;
+      startGame = function startGameV91() {
+        const out = baseStartGame91.apply(this, arguments);
+        try { tag91(); setTimeout(tag91, 0); setTimeout(tag91, 250); } catch (_) {}
+        return out;
+      };
+      startGame.__v91Tag = true;
+    }
+    if (typeof updateGame === 'function' && !updateGame.__v91Tag) {
+      const baseUpdateGame91 = updateGame;
+      updateGame = function updateGameV91(dt) {
+        const out = baseUpdateGame91.apply(this, arguments);
+        try {
+          if (typeof codexOverlay !== 'undefined' && codexOverlay && !codexOverlay.classList.contains('hidden')) {
+            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            if (!lastVisibleCodexRepair91 || now - lastVisibleCodexRepair91 > 250) {
+              lastVisibleCodexRepair91 = now;
+              repairCodex91('update-visible');
+            }
+          }
+          if (!state.v92ClaudeReconciledPolished && state.buildTag !== V91_VERSION) tag91();
+        } catch (_) {}
+        return out;
+      };
+      updateGame.__v91Tag = true;
+    }
+
+    state.v91Debug = function v91Debug() {
+      const prior = {
+        v90: typeof state.v90Debug === 'function' ? state.v90Debug() : null,
+        v89: typeof state.v89Debug === 'function' ? state.v89Debug() : null
+      };
+      tag91();
+      const target = target91();
+      let deckInfo = null;
+      try {
+        const deck = target && target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector('.v71BossGrid');
+        deckInfo = grid ? {
+          cards: grid.querySelectorAll('.v71BossCard').length,
+          drowned91: grid.querySelectorAll('[data-v91-boss="drownedSun"]').length,
+          drownedAny: grid.querySelectorAll('[data-v81-boss="drownedSun"],[data-v85-boss="drownedSun"],[data-v86-boss="drownedSun"],[data-v87-boss="drownedSun"],[data-v88-boss="drownedSun"],[data-v90-boss="drownedSun"],[data-v91-boss="drownedSun"],[data-v92-boss="drownedSun"]').length,
+          count: deck.querySelector('.v71BossDeckCount') ? deck.querySelector('.v71BossDeckCount').textContent : null
+        } : null;
+      } catch (_) {}
+      return {
+        version: V91_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE91,
+        basedOn: sys.basedOn,
+        mode: state.mode,
+        overlayMode: state.overlayMode,
+        title: (typeof overlay !== 'undefined' && overlay) ? {
+          hidden: !!overlay.classList.contains('hidden'),
+          classes: overlay.classList ? Array.from(overlay.classList) : [],
+          title: (typeof overlayTitle !== 'undefined' && overlayTitle) ? overlayTitle.textContent : null,
+          start: (typeof startBtn !== 'undefined' && startBtn) ? startBtn.textContent : null
+        } : null,
+        codex: deckInfo,
+        stats: Object.assign({}, sys.stats),
+        prior: prior
+      };
+    };
+
+    state.v91SelfTest = function v91SelfTest() {
+      const out = { version: V91_VERSION };
+      const run = function (name, fn) {
+        try { out[name] = fn(); }
+        catch (e) { out[name] = { ok: false, error: String(e && (e.message || e)) }; }
+      };
+      sys.stats.selfTestsRun += 1;
+      run('boot', function () {
+        const d = state.v91Debug();
+        return { ok: d.buildTag === V91_VERSION && d.cacheExpected === CACHE91, tag: d.buildTag, mode: d.mode };
+      });
+      run('codex', function () {
+        state.save = state.save || {};
+        state.save.defeatedBosses = state.save.defeatedBosses || {};
+        state.save.defeatedBosses.drownedSun = true;
+        try { if (typeof renderCodexStats === 'function') renderCodexStats(); } catch (_) {}
+        repairCodex91('selftest');
+        const target = target91();
+        const deck = target && target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector('.v71BossGrid');
+        const cards = grid ? grid.querySelectorAll('.v71BossCard').length : 0;
+        const drowned91 = grid ? grid.querySelectorAll('[data-v91-boss="drownedSun"]').length : 0;
+        const drownedLegacy = grid ? grid.querySelectorAll('[data-v81-boss="drownedSun"],[data-v85-boss="drownedSun"],[data-v86-boss="drownedSun"],[data-v87-boss="drownedSun"],[data-v88-boss="drownedSun"],[data-v90-boss="drownedSun"]').length : 0;
+        return { ok: cards >= 7 && drowned91 === 1 && drownedLegacy === 0, cards, drowned91, drownedLegacy, count: deck && deck.querySelector('.v71BossDeckCount') ? deck.querySelector('.v71BossDeckCount').textContent : null };
+      });
+      run('v90Core', function () {
+        const t = typeof state.v90SelfTest === 'function' ? state.v90SelfTest() : null;
+        tag91();
+        return { ok: !!(t && t.ok), v90: t };
+      });
+      out.ok = Object.keys(out).filter(k => k !== 'version' && k !== 'ok').every(k => out[k] && out[k].ok !== false);
+      tag91();
+      return out;
+    };
+
+    try {
+      disableOlderCodexObservers91();
+      installObserver91();
+      repairCodex91('install');
+      ['v84Debug', 'v85Debug', 'v89Debug', 'v90Debug'].forEach(wrapAndRetag91);
+      tag91();
+      setTimeout(function () { try { disableOlderCodexObservers91(); repairCodex91('install0'); tag91(); } catch (_) {} }, 0);
+      setTimeout(function () { try { repairCodex91('install400'); tag91(); } catch (_) {} }, 400);
+      setTimeout(function () { try { repairCodex91('install900'); tag91(); } catch (_) {} }, 900);
+      setTimeout(function () { try { repairCodex91('install1700'); tag91(); } catch (_) {} }, 1700);
+      setTimeout(function () { try { tag91(); } catch (_) {} }, 2800);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V91_CLAUDE_RECONCILED_STABLE_TOTALITY__ = sys;
+        window.noMoonV91Debug = function () { return state.v91Debug(); };
+        window.noMoonV91SelfTest = function () { return state.v91SelfTest(); };
+        window.noMoonV91RepairCodex = function () { return repairCodex91('console'); };
+      }
+    } catch (e) { log91(e, 'install'); }
+    state.buildTag = V91_VERSION;
+  })();
+
+
+
+  // ===================================================================
+  // === v92 — Claude-reconciled polished Netlify finalizer ============
+  // ===================================================================
+  // v92 is intentionally conservative. It keeps the Claude-reconciled
+  // startup path, owns one final Drowned Sun/Codex repair pass, installs a
+  // static same-origin PWA manifest, stabilizes the final build tag after
+  // older debug wrappers run, and adds one last title/Descend label fallback
+  // without reintroducing any self-mutating Codex observer loop.
+  (function installV92ClaudeReconciledPolishedNetlify() {
+    const V92_VERSION = 'qual.claude-reconciled-polished-netlify.2026-05-13.v92';
+    const CACHE92 = 'no-moon-claude-reconciled-polished-netlify-v92';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v92ClaudeReconciledPolished && state.v92ClaudeReconciledPolished.installed) return;
+
+    const sys = state.v92ClaudeReconciledPolished = {
+      installed: true,
+      version: V92_VERSION,
+      cacheExpected: CACHE92,
+      basedOn: 'Claude v89 recovery + v90 safe convergence + v91 Codex owner; v92 adds manifest/build/title polish.',
+      stats: {
+        buildTagsStamped: 0,
+        titleSyncs: 0,
+        descendFallbacks: 0,
+        codexRepairsDelegated: 0,
+        codexWrites: 0,
+        codexDuplicatesRemoved: 0,
+        legacyObserversDisabled: 0,
+        wrappersInstalled: 0,
+        selfTestsRun: 0,
+        lastError: null
+      }
+    };
+
+    let lastVisibleCodexDelegate92 = 0;
+
+    function log92(e, where) {
+      try {
+        const msg = (where || 'v92') + ': ' + (e && (e.message || String(e)) || 'unknown');
+        sys.stats.lastError = msg;
+        console.warn('[No Moon v92]', msg, e);
+      } catch (_) {}
+    }
+
+    function tag92() {
+      try {
+        let changed = false;
+        if (state.buildTag !== V92_VERSION) { state.buildTag = V92_VERSION; changed = true; }
+        if (typeof document !== 'undefined') {
+          const desired = 'build: ' + V92_VERSION;
+          const tag = document.getElementById('buildTagDisplay');
+          if (tag && tag.textContent !== desired) { tag.textContent = desired; changed = true; }
+          if (document.documentElement && document.documentElement.dataset.noMoonBuild !== V92_VERSION) {
+            document.documentElement.dataset.noMoonBuild = V92_VERSION;
+            changed = true;
+          }
+        }
+        if (changed) sys.stats.buildTagsStamped += 1;
+      } catch (_) {}
+    }
+
+    function selectedCharacter92() {
+      try { if (typeof currentSelectedCharacter === 'function') return currentSelectedCharacter(); } catch (_) {}
+      try {
+        const id = state.selectedCharId || (Array.isArray(CHARACTERS) && CHARACTERS[0] && CHARACTERS[0].id);
+        return (Array.isArray(CHARACTERS) && CHARACTERS.find(function (c) { return c && c.id === id; })) || (Array.isArray(CHARACTERS) && CHARACTERS[0]) || null;
+      } catch (_) { return null; }
+    }
+
+    function titleIsChoosing92() {
+      try {
+        if (state.mode !== 'title') return false;
+        if (typeof overlay === 'undefined' || !overlay || overlay.classList.contains('hidden')) return false;
+        const title = (typeof overlayTitle !== 'undefined' && overlayTitle) ? (overlayTitle.textContent || '') : '';
+        if (/choose\s+passenger/i.test(title)) return true;
+        return !!(overlay.classList && (overlay.classList.contains('v66TitleSelect') || overlay.classList.contains('v72TitleSelect')));
+      } catch (_) { return false; }
+    }
+
+    function syncStartButton92(reason) {
+      try {
+        if (!titleIsChoosing92()) return false;
+        if (typeof startBtn === 'undefined' || !startBtn) return false;
+        const ch = selectedCharacter92();
+        const name = ch && ch.name ? ch.name : 'Rook';
+        const desired = 'Descend as ' + name;
+        if (startBtn.textContent !== desired) {
+          startBtn.textContent = desired;
+          startBtn.setAttribute('aria-label', desired);
+        }
+        sys.stats.titleSyncs += 1;
+        tag92();
+        return true;
+      } catch (e) { log92(e, 'syncStartButton ' + (reason || '')); return false; }
+    }
+
+    function scheduleTitleSync92(reason) {
+      try {
+        setTimeout(function () { syncStartButton92(reason || 'sync0'); tag92(); }, 0);
+        setTimeout(function () { syncStartButton92(reason || 'sync80'); tag92(); }, 80);
+        setTimeout(function () { syncStartButton92(reason || 'sync220'); tag92(); }, 220);
+      } catch (_) {}
+    }
+
+    function readJson92(key) { try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (_) { return {}; } }
+    function targetCodex92() { try { return (typeof codexOverlay !== 'undefined' && codexOverlay && codexOverlay.querySelector) ? codexOverlay : null; } catch (_) { return null; } }
+    function setAttr92(el, name, value) { try { if (el && el.getAttribute(name) !== String(value)) { el.setAttribute(name, String(value)); sys.stats.codexWrites += 1; return true; } } catch (_) {} return false; }
+    function setData92(el, key, value) { try { if (el && el.dataset && el.dataset[key] !== String(value)) { el.dataset[key] = String(value); sys.stats.codexWrites += 1; return true; } } catch (_) {} return false; }
+    function num92(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+    function disableCodexObservers92() {
+      try {
+        const target = targetCodex92();
+        if (!target) return 0;
+        let n = 0;
+        ['__v85DrownedSunObserver', '__v86CodexObserver', '__v87CodexObserver', '__v88CodexObserver', '__v90CodexObserver', '__v91CodexObserver'].forEach(function (key) {
+          try {
+            const obs = target[key];
+            if (obs && !obs.__v92Disabled) {
+              if (typeof obs.takeRecords === 'function') { try { obs.takeRecords(); } catch (_) {} }
+              if (typeof obs.disconnect === 'function') { try { obs.disconnect(); n += 1; } catch (_) {} }
+              try { obs.__v92Disabled = true; } catch (_) {}
+              try { target[key] = { __v92Disabled: true }; } catch (_) {}
+            }
+          } catch (_) {}
+        });
+        try { state._v85CodexRepairScheduled = true; } catch (_) {}
+        if (n) sys.stats.legacyObserversDisabled += n;
+        return n;
+      } catch (e) { log92(e, 'disableCodexObservers'); return 0; }
+    }
+
+    function drownedSunRevealed92() {
+      try {
+        const s = state.save || {};
+        const mirrors = [];
+        try { mirrors.push(readJson92('noMoonProgress_v68')); } catch (_) {}
+        try { mirrors.push(readJson92((typeof SAVE_KEY !== 'undefined' && SAVE_KEY) ? SAVE_KEY : 'noMoonSave_v1')); } catch (_) {}
+        const check = function (obj) {
+          obj = obj || {};
+          const d = obj.defeatedBosses || {}, v = obj.victories || {};
+          return !!(d.drownedSun || d.v80DrownedSun || d.v79DrownedSun ||
+            num92(v.drownedSkyClears) > 0 || num92(v.drownedSunClears) > 0 ||
+            num92(v.drownedSky) > 0 || num92(v.drownedSun) > 0);
+        };
+        return check(s) || mirrors.some(check) || !!(state._v80DrownedSunDefeated || state._v81DrownedSunDefeated);
+      } catch (_) { return false; }
+    }
+
+    function repairCodex92(reason) {
+      let changed = false;
+      try {
+        disableCodexObservers92();
+        const target = targetCodex92();
+        if (!target) return false;
+        const deck = target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector ? deck.querySelector('.v71BossGrid') : null;
+        if (!deck || !grid) return false;
+        const revealed = drownedSunRevealed92();
+        const selector = '[data-v81-boss="drownedSun"],[data-v85-boss="drownedSun"],[data-v86-boss="drownedSun"],[data-v87-boss="drownedSun"],[data-v88-boss="drownedSun"],[data-v90-boss="drownedSun"],[data-v91-boss="drownedSun"],[data-v92-boss="drownedSun"]';
+        const found = Array.from(grid.querySelectorAll(selector));
+        let card = found.find(function (el) { return el && el.dataset && el.dataset.v92Boss === 'drownedSun'; }) || found.find(function (el) { return el && el.dataset && el.dataset.v91Boss === 'drownedSun'; }) || found[0] || null;
+        for (const el of found) {
+          if (el !== card) { try { el.remove(); changed = true; sys.stats.codexDuplicatesRemoved += 1; } catch (_) {} }
+        }
+        if (!card) { card = document.createElement('button'); card.type = 'button'; grid.appendChild(card); changed = true; }
+        else if (card.parentNode !== grid) { grid.appendChild(card); changed = true; }
+        if (card.type !== 'button') { try { card.type = 'button'; changed = true; } catch (_) {} }
+        // Mark the canonical card with every legacy marker older repair code
+        // knows about. That prevents v85/v90 from believing Drowned Sun is
+        // missing and appending a second card, while v92 remains the final owner.
+        ['v81Boss','v85Boss','v86Boss','v87Boss','v88Boss','v90Boss','v91Boss','v92Boss'].forEach(function (key) { changed = setData92(card, key, 'drownedSun') || changed; });
+        const desiredClass = revealed ? 'v71BossCard revealed' : 'v71BossCard locked';
+        if (card.className !== desiredClass) { card.className = desiredClass; sys.stats.codexWrites += 1; changed = true; }
+        changed = setAttr92(card, 'aria-label', revealed ? 'Drowned Sun defeated' : 'Sealed defeated-boss card') || changed;
+        const desiredHtml = revealed
+          ? '<img src="../assets/no-moon/bosses/drowned-sun-card.webp" alt="Drowned Sun"><span class="v71BossName">Drowned Sun</span><span class="v71BossStatus">Defeated</span>'
+          : '<img src="../assets/no-moon/bosses/card-back.webp" alt="Sealed boss card"><span class="v71BossSeal">Sealed</span>';
+        if (card.innerHTML !== desiredHtml) { card.innerHTML = desiredHtml; sys.stats.codexWrites += 1; changed = true; }
+        const isDrowned = function (el) { return !!(el && el.dataset && (el.dataset.v81Boss === 'drownedSun' || el.dataset.v85Boss === 'drownedSun' || el.dataset.v86Boss === 'drownedSun' || el.dataset.v87Boss === 'drownedSun' || el.dataset.v88Boss === 'drownedSun' || el.dataset.v90Boss === 'drownedSun' || el.dataset.v91Boss === 'drownedSun' || el.dataset.v92Boss === 'drownedSun')); };
+        const cards = Array.from(grid.querySelectorAll('.v71BossCard'));
+        const baseCards = cards.filter(function (el) { return !isDrowned(el); });
+        const baseRevealed = baseCards.filter(function (el) { return el.classList && el.classList.contains('revealed'); }).length;
+        const countEl = deck.querySelector('.v71BossDeckCount');
+        if (countEl) {
+          const txt = (baseRevealed + (revealed ? 1 : 0)) + '/' + (baseCards.length + 1) + ' revealed';
+          if (countEl.textContent !== txt) { countEl.textContent = txt; sys.stats.codexWrites += 1; changed = true; }
+        }
+        sys.stats.codexRepairsDelegated += 1;
+        tag92();
+        return changed;
+      } catch (e) { log92(e, 'repairCodex92 ' + (reason || '')); return false; }
+    }
+
+    function delegateCodexRepair92(reason) {
+      return repairCodex92(reason || 'delegate');
+    }
+
+    function maybeDescendFallback92(ev) {
+      try {
+        const target = ev && ev.target && ev.target.closest && ev.target.closest('#startBtn');
+        if (!target) return;
+        const wasChoosing = titleIsChoosing92() || /^\s*Descend\s+as\s+/i.test(target.textContent || '');
+        if (!wasChoosing) return;
+        setTimeout(function () {
+          try {
+            if (state.mode !== 'title') { tag92(); return; }
+            if (!titleIsChoosing92()) { tag92(); return; }
+            const ch = selectedCharacter92();
+            if (!ch || typeof startGame !== 'function') return;
+            startGame(ch.id || state.selectedCharId || 'rook');
+            sys.stats.descendFallbacks += 1;
+            tag92();
+          } catch (e) { log92(e, 'descendFallback'); }
+        }, 180);
+      } catch (e) { log92(e, 'maybeDescendFallback'); }
+    }
+
+    function wrapFn92(name, after) {
+      try {
+        if (typeof window === 'undefined') return false;
+        // Functions are declared in the game scope, not as normal window props,
+        // so wrap by name through eval in this single-file non-module script.
+        const fn = eval(name); // eslint-disable-line no-eval
+        if (typeof fn !== 'function' || fn.__v92Polished) return false;
+        const wrapped = function v92WrappedFunction() {
+          const out = fn.apply(this, arguments);
+          try { if (typeof after === 'function') after(name); } catch (_) {}
+          return out;
+        };
+        wrapped.__v92Polished = true;
+        eval(name + ' = wrapped'); // eslint-disable-line no-eval
+        sys.stats.wrappersInstalled += 1;
+        return true;
+      } catch (_) { return false; }
+    }
+
+    function installHooks92() {
+      try {
+        wrapFn92('showOverlay', function () { scheduleTitleSync92('showOverlay'); tag92(); });
+        wrapFn92('updateOverlay', function () { scheduleTitleSync92('updateOverlay'); tag92(); });
+        wrapFn92('hideOverlay', function () { tag92(); });
+        wrapFn92('startGame', function () { tag92(); setTimeout(tag92, 0); setTimeout(tag92, 250); });
+        wrapFn92('renderCharacterCards', function () { scheduleTitleSync92('renderCharacterCards'); tag92(); });
+        wrapFn92('openCodex', function () { delegateCodexRepair92('openCodex'); tag92(); });
+        wrapFn92('renderCodexStats', function () { delegateCodexRepair92('renderCodexStats'); tag92(); });
+        wrapFn92('updateGame', function () {
+          try {
+            if (typeof codexOverlay !== 'undefined' && codexOverlay && !codexOverlay.classList.contains('hidden')) {
+              const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+              if (!lastVisibleCodexDelegate92 || now - lastVisibleCodexDelegate92 > 250) {
+                lastVisibleCodexDelegate92 = now;
+                delegateCodexRepair92('updateGame-visible');
+              }
+            }
+          } catch (_) {}
+          if (state.buildTag !== V92_VERSION) tag92();
+        });
+        if (typeof document !== 'undefined' && !document.__v92PolishedTitleHooks) {
+          document.addEventListener('pointerdown', function (ev) { maybeDescendFallback92(ev); scheduleTitleSync92('pointerdown'); }, { capture: true, passive: true });
+          document.addEventListener('click', function (ev) { maybeDescendFallback92(ev); scheduleTitleSync92('click'); }, { capture: true, passive: true });
+          document.__v92PolishedTitleHooks = true;
+        }
+      } catch (e) { log92(e, 'installHooks'); }
+    }
+
+    state.v92Debug = function v92Debug() {
+      let prior = null;
+      try { prior = typeof state.v91Debug === 'function' ? state.v91Debug() : null; } catch (_) {}
+      tag92();
+      let codex = null;
+      try {
+        const target = (typeof codexOverlay !== 'undefined' && codexOverlay && codexOverlay.querySelector) ? codexOverlay : null;
+        const deck = target && target.querySelector('.v71BossDeck');
+        const grid = deck && deck.querySelector('.v71BossGrid');
+        codex = grid ? {
+          cards: grid.querySelectorAll('.v71BossCard').length,
+          drownedAny: grid.querySelectorAll('[data-v81-boss="drownedSun"],[data-v85-boss="drownedSun"],[data-v86-boss="drownedSun"],[data-v87-boss="drownedSun"],[data-v88-boss="drownedSun"],[data-v90-boss="drownedSun"],[data-v91-boss="drownedSun"],[data-v92-boss="drownedSun"]').length,
+          count: deck.querySelector('.v71BossDeckCount') ? deck.querySelector('.v71BossDeckCount').textContent : null
+        } : null;
+      } catch (_) {}
+      return {
+        version: V92_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE92,
+        mode: state.mode,
+        overlayMode: state.overlayMode,
+        title: (typeof overlay !== 'undefined' && overlay) ? {
+          hidden: !!overlay.classList.contains('hidden'),
+          title: (typeof overlayTitle !== 'undefined' && overlayTitle) ? overlayTitle.textContent : null,
+          start: (typeof startBtn !== 'undefined' && startBtn) ? startBtn.textContent : null
+        } : null,
+        codex: codex,
+        stats: Object.assign({}, sys.stats),
+        prior: prior
+      };
+    };
+
+    state.v92SelfTest = function v92SelfTest() {
+      const out = { version: V92_VERSION };
+      const run = function (name, fn) {
+        try { out[name] = fn(); }
+        catch (e) { out[name] = { ok: false, error: String(e && (e.message || e)) }; }
+      };
+      sys.stats.selfTestsRun += 1;
+      run('boot', function () {
+        tag92();
+        return { ok: state.buildTag === V92_VERSION, tag: state.buildTag, cache: CACHE92, mode: state.mode };
+      });
+      run('titleSync', function () {
+        const before = (typeof startBtn !== 'undefined' && startBtn) ? startBtn.textContent : null;
+        const applicable = titleIsChoosing92();
+        const fixed = syncStartButton92('selftest');
+        const after = (typeof startBtn !== 'undefined' && startBtn) ? startBtn.textContent : null;
+        return { ok: !applicable || /^Descend as /.test(after || ''), applicable, fixed, before, after };
+      });
+      run('codexDelegate', function () {
+        delegateCodexRepair92('selftest');
+        const d = state.v92Debug();
+        const c = d.codex || {};
+        return { ok: !c.cards || (c.cards >= 7 && c.drownedAny <= 1), cards: c.cards || null, drownedAny: c.drownedAny || 0, count: c.count || null };
+      });
+      out.ok = Object.keys(out).filter(function (k) { return k !== 'version' && k !== 'ok'; }).every(function (k) { return out[k] && out[k].ok !== false; });
+      tag92();
+      return out;
+    };
+
+    try {
+      installHooks92();
+      tag92();
+      scheduleTitleSync92('install');
+      setTimeout(function () { try { delegateCodexRepair92('install0'); tag92(); } catch (_) {} }, 0);
+      setTimeout(function () { try { delegateCodexRepair92('install120'); syncStartButton92('install120'); tag92(); } catch (_) {} }, 120);
+      setTimeout(function () { try { delegateCodexRepair92('install400'); syncStartButton92('install400'); tag92(); } catch (_) {} }, 400);
+      setTimeout(function () { try { delegateCodexRepair92('install950'); tag92(); } catch (_) {} }, 950);
+      setTimeout(function () { try { delegateCodexRepair92('install1900'); tag92(); } catch (_) {} }, 1900);
+      setTimeout(function () { try { delegateCodexRepair92('install3600'); tag92(); } catch (_) {} }, 3600);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V92_CLAUDE_RECONCILED_POLISHED__ = sys;
+        window.noMoonV92Debug = function () { return state.v92Debug(); };
+        window.noMoonV92SelfTest = function () { return state.v92SelfTest(); };
+        window.noMoonV92RepairCodex = function () { return delegateCodexRepair92('console'); };
+        window.noMoonCurrentDebug = window.noMoonV92Debug;
+        window.noMoonCurrentSelfTest = window.noMoonV92SelfTest;
+      }
+    } catch (e) { log92(e, 'install'); }
+    state.buildTag = V92_VERSION;
+  })();
+
   renderCodexStats();
 
 })();
-
 </script>
 </body>
 </html>

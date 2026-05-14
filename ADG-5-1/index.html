@@ -6,7 +6,7 @@
   <title>Qualiacology | Alexander Duncan Guitar</title>
   <meta
     name="description"
-    content="Qualiacology is Alexander Duncan Guitar's hub for psychopharmacology, harm reduction, Doopliss music, the This Helped Someone book project, No Moon, and an evidence-based community."
+    content="Qualiacology is Alexander Duncan Guitar's home for psychopharmacology, community, Doopliss music, books, and No Moon — a luminous browser roguelike about strange Passengers descending beneath a missing sky."
   />
   <meta name="theme-color" content="#0d1020" />
   <meta name="robots" content="index, follow" />
@@ -15,7 +15,7 @@
   <meta property="og:title" content="Qualiacology | Alexander Duncan Guitar" />
   <meta
     property="og:description"
-    content="Psychopharmacology, harm reduction, music, and community — one home for the chemistry of being alive."
+    content="Psychopharmacology, music, community, books, and No Moon — one home for the chemistry of being alive and the games hiding underneath it."
   />
   <meta property="og:url" content="/" />
   <meta property="og:image" content="/assets/qualiacology-og.png" />
@@ -24,7 +24,7 @@
   <meta name="twitter:title" content="Qualiacology | Alexander Duncan Guitar" />
   <meta
     name="twitter:description"
-    content="Psychopharmacology, harm reduction, music, and community — one home for the chemistry of being alive."
+    content="Psychopharmacology, music, community, books, and No Moon — one home for the chemistry of being alive and the games hiding underneath it."
   />
   <meta name="twitter:image" content="/assets/qualiacology-og.png" />
 
@@ -1635,30 +1635,6 @@
       font-size: 0.92rem;
     }
 
-    .build-notes {
-      padding: clamp(1.2rem, 3vw, 1.45rem);
-      display: grid;
-      gap: 0.8rem;
-    }
-
-    .build-notes h3 { font-size: 1.45rem; }
-
-    .build-list {
-      list-style: none;
-      display: grid;
-      gap: 0.65rem;
-      padding: 0;
-      margin: 0;
-    }
-
-    .build-list li {
-      display: flex;
-      gap: 0.65rem;
-      color: var(--muted);
-      align-items: flex-start;
-    }
-
-    .build-list i { color: var(--cyan); margin-top: 0.22rem; }
 
     .copy-status {
       min-height: 1.2rem;
@@ -1741,9 +1717,6 @@
         padding-right: 1.1rem;
       }
 
-      .build-notes {
-        padding: 1.15rem;
-      }
     }
 
     @media (max-width: 520px) {
@@ -1913,6 +1886,186 @@
         transform: none;
       }
     }
+
+    /* v75 final master merge: compact public No Moon portal, no build-note sidecar, no endless PC scroll. */
+    .no-moon-section {
+      padding: clamp(3.2rem, 5vw, 4.7rem) 0 !important;
+    }
+
+    .no-moon-section .section-header {
+      max-width: 900px;
+      margin-bottom: clamp(1rem, 2vw, 1.45rem);
+    }
+
+    .no-moon-section .lead {
+      max-width: 78ch;
+      color: #dfe6ff;
+    }
+
+    .no-moon-showcase {
+      grid-template-columns: 1fr !important;
+      gap: clamp(1rem, 2vw, 1.35rem) !important;
+      align-items: stretch;
+    }
+
+    .game-portal.no-moon-portal {
+      min-height: clamp(360px, 42vw, 500px);
+      align-content: end;
+      padding: clamp(1.2rem, 3vw, 2.1rem);
+      border-radius: clamp(24px, 3vw, 38px);
+      border: 1px solid rgba(166, 240, 255, 0.20);
+      box-shadow:
+        0 34px 100px rgba(0, 0, 0, 0.58),
+        0 0 80px rgba(105, 226, 255, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.10);
+      background: #05070d;
+    }
+
+    .game-portal.no-moon-portal::before {
+      background:
+        linear-gradient(90deg, rgba(3, 5, 11, 0.94) 0%, rgba(3, 5, 11, 0.70) 34%, rgba(3, 5, 11, 0.20) 67%, rgba(3, 5, 11, 0.76) 100%),
+        linear-gradient(180deg, rgba(3, 5, 11, 0.14) 0%, rgba(3, 5, 11, 0.48) 62%, rgba(3, 5, 11, 0.96) 100%),
+        url('/assets/no-moon/title/no-moon-title-desktop.webp') center / cover no-repeat !important;
+      opacity: 1;
+      filter: saturate(1.08) contrast(1.06);
+    }
+
+    .game-portal.no-moon-portal::after {
+      inset: clamp(0.9rem, 2vw, 1.45rem);
+      border-radius: clamp(20px, 2.6vw, 32px);
+      border-color: rgba(221, 245, 255, 0.16);
+      background-image:
+        radial-gradient(circle at 20% 80%, rgba(145, 216, 255, 0.20), transparent 18%),
+        radial-gradient(circle at 74% 18%, rgba(184, 146, 255, 0.16), transparent 22%),
+        linear-gradient(rgba(255, 255, 255, 0.030) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.030) 1px, transparent 1px);
+      background-size: auto, auto, 42px 42px, 42px 42px;
+      mask-image: none;
+      opacity: 0.72;
+      box-shadow: inset 0 0 48px rgba(145, 216, 255, 0.06);
+    }
+
+    .portal-veil {
+      position: absolute;
+      inset: auto 0 0;
+      height: 58%;
+      z-index: -1;
+      background:
+        radial-gradient(ellipse at 24% 64%, rgba(145, 216, 255, 0.20), transparent 36%),
+        linear-gradient(180deg, transparent 0%, rgba(3, 5, 11, 0.44) 34%, rgba(3, 5, 11, 0.90) 100%);
+      pointer-events: none;
+    }
+
+    .no-moon-portal .portal-kicker {
+      color: #bff3ff;
+      text-shadow: 0 0 18px rgba(105, 226, 255, 0.35);
+    }
+
+    .no-moon-portal h3 {
+      max-width: 9ch;
+      margin-top: 0.18rem;
+      font-size: clamp(3.1rem, 8vw, 5.9rem);
+      line-height: 0.88;
+      letter-spacing: -0.085em;
+      color: #f8fbff;
+      text-shadow:
+        0 0 22px rgba(105, 226, 255, 0.40),
+        0 18px 48px rgba(0, 0, 0, 0.74);
+    }
+
+    .no-moon-portal .portal-copy {
+      max-width: 58ch;
+      margin: 0.85rem 0 0;
+      color: #e9edff;
+      font-size: clamp(1rem, 1.8vw, 1.18rem);
+      text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
+    }
+
+    .portal-actions {
+      margin-top: 1.35rem;
+    }
+
+    .game-feature-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: clamp(0.75rem, 2vw, 1rem);
+    }
+
+    .game-feature {
+      position: relative;
+      overflow: hidden;
+      min-height: 118px;
+      padding: 0.95rem;
+      border-radius: 24px;
+      border: 1px solid rgba(221, 245, 255, 0.12);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(105, 226, 255, 0.10), transparent 34%),
+        linear-gradient(180deg, rgba(18, 23, 39, 0.78), rgba(7, 9, 18, 0.88));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    .game-feature::after {
+      content: "";
+      position: absolute;
+      inset: auto -20% -42% 42%;
+      height: 110px;
+      background: radial-gradient(ellipse at center, rgba(184, 146, 255, 0.18), transparent 64%);
+      transform: rotate(-8deg);
+      pointer-events: none;
+    }
+
+    .game-feature span {
+      display: inline-flex;
+      margin-bottom: 0.7rem;
+      color: var(--cyan-soft);
+      font-family: "Space Grotesk", "Inter", sans-serif;
+      font-size: 0.84rem;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+    }
+
+    .game-feature strong {
+      display: block;
+      color: #fff;
+      font-family: "Space Grotesk", "Inter", sans-serif;
+      font-size: 1.18rem;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.35rem;
+    }
+
+    .game-feature p {
+      position: relative;
+      z-index: 1;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+      line-height: 1.48;
+    }
+
+    @media (max-width: 940px) {
+      .game-feature-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      .game-portal.no-moon-portal {
+        min-height: min(680px, 112vw);
+        align-content: end;
+      }
+
+      .game-portal.no-moon-portal::before {
+        background:
+          linear-gradient(180deg, rgba(3, 5, 11, 0.12) 0%, rgba(3, 5, 11, 0.28) 42%, rgba(3, 5, 11, 0.94) 100%),
+          url('/assets/no-moon/title/no-moon-title-mobile.webp') center / cover no-repeat !important;
+      }
+
+      .no-moon-portal h3 {
+        font-size: clamp(3rem, 18vw, 5.4rem);
+      }
+
+      .game-feature-strip { grid-template-columns: 1fr; }
+      .game-feature { min-height: 0; }
+    }
+
   </style>
 </head>
 <body>
@@ -2119,49 +2272,56 @@
         </div>
       </section>
 
-      <section class="section" id="game">
-        <span class="section-glow cyan" style="width: 22rem; height: 22rem; right: -7rem; top: 3rem;" aria-hidden="true"></span>
-        <span class="section-glow violet" style="width: 18rem; height: 18rem; left: -6rem; bottom: 5rem;" aria-hidden="true"></span>
+      <section class="section no-moon-section" id="game">
+        <span class="section-glow cyan" style="width: 24rem; height: 24rem; right: -8rem; top: 2rem;" aria-hidden="true"></span>
+        <span class="section-glow violet" style="width: 20rem; height: 20rem; left: -7rem; bottom: 4rem;" aria-hidden="true"></span>
 
         <div class="container">
           <div class="section-header reveal">
             <p class="eyebrow">Game</p>
             <h2>No Moon</h2>
             <p class="lead">
-              A fast one-file dungeon shmup: pick a pilot, clear chamber graphs, hunt hidden reliquaries, graft strange modules, survive boss ceremonies, and descend under a dead sky.
+              A luminous browser roguelike about strange little Passengers descending through sealed rooms beneath a missing sky. Dodge ritual bullet patterns, graft relics into your Hull, uncover side routes, and follow the Bellways downward until the world starts admitting what it has been hiding.
             </p>
           </div>
 
           <div class="no-moon-showcase">
-            <article class="card cool game-portal reveal">
-              <div class="portal-moon" aria-hidden="true"></div>
-              <div class="portal-kicker">new playable wing</div>
-              <h3>No Moon</h3>
+            <article class="card cool game-portal no-moon-portal reveal" aria-labelledby="no-moon-portal-title">
+              <div class="portal-veil" aria-hidden="true"></div>
+              <p class="portal-kicker">Playable now • browser arcade descent</p>
+              <h3 id="no-moon-portal-title">No Moon</h3>
               <p class="portal-copy">
-                A nasty little one-file dungeon shmup with pilot builds, biome pressure, hidden reliquaries, boss death ceremonies, subtle floor weather, procedural audio, and an offline cache scoped to the game folder.
+                Fight through beautiful little death-rooms, crack open boss ceremonies, collect glass-star splinters, discover hidden reliquaries, and decide whether to keep descending or step through the strange side doors the dungeon pretends it did not build.
               </p>
-              <div class="button-row">
-                <a class="button cyan" href="/no-moon/"><i class="fa-solid fa-gamepad"></i> Enter the Narthex</a>
+              <div class="button-row portal-actions">
+                <a class="button cyan" href="/no-moon/"><i class="fa-solid fa-gamepad"></i> Start Descent</a>
                 <button class="ghost-button" type="button" data-copy-link="/no-moon/"><i class="fa-solid fa-copy"></i> Copy Game Link</button>
               </div>
               <div class="copy-status" data-copy-status aria-live="polite"></div>
             </article>
 
-            <aside class="build-notes card reveal">
-              <h3>Current build notes</h3>
-              <ul class="build-list">
-                <li><i class="fa-solid fa-moon"></i><span><strong>Ten-floor route:</strong> midpoint Warden, final Null Archon, deliberate bellway ending.</span></li>
-                <li><i class="fa-solid fa-dungeon"></i><span><strong>Dungeon graphs:</strong> smaller readable rooms, locked doors, cache rooms, shrines, and reliquary risk.</span></li>
-                <li><i class="fa-solid fa-wave-square"></i><span><strong>Audio:</strong> procedural SFX/BGM, starts safely off, no giant embedded track.</span></li>
-                <li><i class="fa-solid fa-mobile-screen"></i><span><strong>Mobile-aware:</strong> draft freeze, bottom HUD, projectile budgets, clearer hazards, and lighter decorative floor effects.</span></li>
-              </ul>
-              <div class="route-grid" aria-label="No Moon feature summary">
-                <div class="route-card"><strong>4</strong><span>Pilots with distinct weapons and tradeoffs.</span></div>
-                <div class="route-card"><strong>27</strong><span>Graft modules in the current branch.</span></div>
-                <div class="route-card"><strong>10</strong><span>Floors per completed route.</span></div>
-                <div class="route-card"><strong>1</strong><span>Self-contained HTML game file.</span></div>
+            <div class="game-feature-strip reveal" aria-label="No Moon feature summary">
+              <div class="game-feature">
+                <span>01</span>
+                <strong>Fast readable combat</strong>
+                <p>Compact twin-stick chambers built for dodge, fire, read, survive — with less mid-fight prose and clearer danger.</p>
               </div>
-            </aside>
+              <div class="game-feature">
+                <span>02</span>
+                <strong>Builds that mutate</strong>
+                <p>Grafts, active relics, boss trophies, and Passenger quirks turn each descent into a volatile little machine.</p>
+              </div>
+              <div class="game-feature">
+                <span>03</span>
+                <strong>Secrets with teeth</strong>
+                <p>Hidden reliquaries, strange side doors, the Ferry Dock, and route discoveries that feel found, not advertised.</p>
+              </div>
+              <div class="game-feature">
+                <span>04</span>
+                <strong>Progress with memory</strong>
+                <p>The Field Guide tracks grafts, boss cards, and unlocked Passengers without turning the game into a chore list.</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>

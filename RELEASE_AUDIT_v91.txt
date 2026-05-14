@@ -1,0 +1,10 @@
+No Moon v91 release audit
+
+Base: v90 safe convergence, itself based on Claude v89 / Pro v85 recovery.
+Final changes:
+- Disables v85/v86/v87/v88/v90 Codex observers and owns one v91 paused observer.
+- Keeps exactly one Drowned Sun boss card with v91 canonical marker.
+- Prevents legacy Drowned Sun card markers from letting v85 remove the canonical card.
+- Retags after old debug and overlay wrappers so current debug reports v91.
+- Bumps game service-worker cache to no-moon-claude-reconciled-stable-totality-v91.
+- Preserves v90 reroll, bullet, custom-victory, touch-aim, Moots, and self-test hardening.

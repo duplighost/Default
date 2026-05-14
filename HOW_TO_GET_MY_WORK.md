@@ -13,23 +13,23 @@ Every time I finish a build pass, I'll put a complete drop-in website zip at:
 The current one is:
 
 ```
-/releases/no-moon-v89-website.zip   (~3.7 MB)
+/releases/no-moon-v92-website.zip   (~3.6 MB)
 ```
 
-Older releases (v76 through v84) stay in the same folder if you ever need to roll back. **Pro's v86 / v87 / v88 are skipped on purpose** — they shipped a hot DOM-mutation loop in the Codex repair that froze the page. v89 = Pro's v85 (which had the loop fixed correctly with setTimeout deferral) + a version bump + a fresh SW cache name to force Alex's browser to drop the broken v88 cache.
+Older releases (v76 through v89) stay in the same folder if you ever need to roll back. **Pro's v86 / v87 / v88 are skipped on purpose** — they shipped a hot DOM-mutation loop in the Codex repair that froze the page. v89 was the recovery build (Pro's v85 + version bump). Pro then built v90 → v91 → v92 forward from v89, properly avoiding the loop pattern this time. I audited v92 and it's clean — see RELEASE_AUDIT_v92.txt at the repo root.
 
 Direct raw URL (this is the one that downloaded easily for you):
 
 ```
-https://github.com/duplighost/Default/raw/claude/investigate-code-functionality-gP8aM/releases/no-moon-v89-website.zip
+https://github.com/duplighost/Default/raw/claude/investigate-code-functionality-gP8aM/releases/no-moon-v92-website.zip
 ```
 
-That zip has the **entire website folder structure** inside, ready to unzip onto your host. The internal layout matches the v75 zip you gave me, so it's a literal drop-in replacement — no figuring out which file goes where.
+That zip has the **entire website folder structure** inside, ready to unzip onto your host. It's a literal drop-in replacement — no figuring out which file goes where. (Pro's zip uses an internal folder named `no-moon-v92-claude-reconciled-polished-netlify/` instead of the older `v82_release/` convention — same contents inside.)
 
 Inside the zip:
 
 ```
-v82_release/
+no-moon-v92-claude-reconciled-polished-netlify/
 ├── README_UPLOAD_THIS.txt    ← read this first, it explains everything in the build
 ├── index.html                ← your site landing
 ├── book.html
@@ -94,18 +94,17 @@ That single line is enough to get the same package format.
 Open the browser console on the live game and run:
 
 ```js
-state.v76SelfCheck && state.v76SelfCheck()   // or: state.v75SelfCheck()
+state.v92Debug()
+state.v92SelfTest()
 ```
 
-Paste me the JSON. That tells me which build tag is actually live, which characters are loaded, what the save state is — usually enough to diagnose without guessing.
+Paste me the JSON. That tells me which build tag is actually live, which characters are loaded, what the save state is — usually enough to diagnose without guessing. (`noMoonCurrentDebug()` and `noMoonCurrentSelfTest()` also work; they always point at the latest build.)
 
-For specific symptoms:
+If the codex looks weird or has duplicate Drowned Sun cards:
 
 ```js
-noMoonV76Debug()   // dumps selected char, player template, last 12 messages, room/level info
+noMoonV92RepairCodex()
 ```
-
-That's the "the game said something weird about Mire" diagnostic.
 
 ---
 

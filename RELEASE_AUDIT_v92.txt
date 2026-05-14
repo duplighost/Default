@@ -1,0 +1,29 @@
+No Moon v92 release audit
+
+Base selected: no-moon-v91-claude-reconciled-stable-totality-netlify, the strongest current branch because it starts from Claude's boot-safe v89 rollback, keeps the safer v90 re-ports of the missing v86-v88 fixes, and has a v91 Codex owner that avoids the MutationObserver crash loop.
+
+Final v92 changes:
+- Replaced the blob/dynamic game manifest with a static same-origin `/assets/no-moon/no-moon.webmanifest` and fixed manifest URL handling to remove browser warnings.
+- Bumped the game service-worker cache to no-moon-claude-reconciled-polished-netlify-v92.
+- Added v92 final build-tag restamping so older debug/overlay wrappers cannot leave the game reporting v75/v84/v89/v91 after a start or overlay transition.
+- Added conservative title-screen passenger label sync so the first START opens Choose Passenger and then the action button reads Descend as <Passenger>.
+- Added a guarded Descend fallback that only fires if the player is already on Choose Passenger and the normal click did not start the run.
+- Owns a final v92 Codex repair pass, disables legacy Codex observers including v91, removes duplicate Drowned Sun cards, and marks the single canonical Drowned Sun card with all legacy markers so older repair code does not append another copy.
+
+Preserved from the reconciled line:
+- Claude v89 safe startup recovery from the v88 Codex loop.
+- v90 finite bullet/radius normalization, boss bullet tagging, direct push guard, and createBullet/updateGame guards.
+- v90 v86-style reroll fallback and document-capture reroll rescue.
+- v90 custom victory exit reclose and Drowned Sky active-charge credit.
+- v90 mobile/touch aim repair and Moots false-unlock scrub.
+- v91 authoritative Drowned Sun/Codex ownership without legacy duplicate markers.
+
+Intentionally avoided:
+- The v86/v87/v88 Codex MutationObserver pattern that rewrote the same observed subtree and could hang the page.
+- Self-tests that must be run automatically; all tests are available through console helpers but the normal game boot remains clean.
+
+
+Final packaged v92 performance/stability polish:
+- Made v91/v92 build-tag stamps idempotent so old wrappers cannot cause continuous DOM writes once the final tag is correct.
+- Throttled visible-Codex update-frame repair/delegation to 250ms while retaining repair on open/render/observer/self-test.
+- v92 now performs the final Codex repair itself, disables older Codex observers, and does not reintroduce the self-mutating v86-v88 observer pattern.

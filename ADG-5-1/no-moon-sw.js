@@ -1,4 +1,4 @@
-// Root-level cleanup worker for old No Moon deployments.
+// Root-level cleanup worker v92 for old No Moon deployments. Removes stale no-moon-* caches.
 // The real game worker now lives at /no-moon/no-moon-sw.js.
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());
