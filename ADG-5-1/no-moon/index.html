@@ -51588,18 +51588,23 @@ function drawHudBossMiniStats(p, layout) {
         // just means "more splinters" — fall through.
         if (style.special !== 'splinter') {
           const a = rand93(0, Math.PI * 2);
-          pushPickup93(room, {
+          const drop = {
             type: style.special,
             x: cx + Math.cos(a) * 18,
             y: cy + Math.sin(a) * 18,
             vx: 0,
             vy: 0,
-            r: style.special === 'repair' ? 10 : 11,
+            r: style.special === 'repair' ? 10 : 12,
             age: 0,
             bob: rand93(0, Math.PI * 2),
             remove: false,
             _v93Captain: true
-          });
+          };
+          // Module pickups must carry an itemId to apply on collect.
+          if (style.special === 'module' && typeof chooseBonusItem === 'function') {
+            try { drop.itemId = chooseBonusItem(); } catch (_) {}
+          }
+          pushPickup93(room, drop);
           sys.stats.captainSpecialDrops += 1;
         }
       } catch (e) { log93(e, 'dropCaptainReward'); }
@@ -51684,7 +51689,9 @@ function drawHudBossMiniStats(p, layout) {
             life: 0,
             phase: 'peek',   // peek (move inward) -> linger -> flee (back to door)
             maxLife: 1.4,
-            seen: false
+            seen: false,
+            roomId: room.id,
+            levelIndex: level.index
           });
           sys.stats.captainCameos += 1;
         }
@@ -51694,8 +51701,16 @@ function drawHudBossMiniStats(p, layout) {
       try {
         if (!state._v93Cameos || !state._v93Cameos.length) return;
         const d = Math.max(0, Math.min(0.08, N93(dt, 0.016)));
+        const curLevel = state.level && state.level.index;
+        const curRoomId = state.level && state.level.currentRoomId;
         for (let i = state._v93Cameos.length - 1; i >= 0; i--) {
           const c = state._v93Cameos[i];
+          // Drop cameos that don't belong to the player's current room.
+          // They were spawned for a room the player has since left.
+          if (c.roomId != null && (c.roomId !== curRoomId || c.levelIndex !== curLevel)) {
+            state._v93Cameos.splice(i, 1);
+            continue;
+          }
           c.life += d;
           if (c.phase === 'peek') {
             const t = Math.min(1, c.life / 0.42);
@@ -51723,8 +51738,11 @@ function drawHudBossMiniStats(p, layout) {
       try {
         if (!state._v93Cameos || !state._v93Cameos.length) return;
         const t = N93(state.time, 0);
+        const curLevel = state.level && state.level.index;
+        const curRoomId = state.level && state.level.currentRoomId;
         ctx.save();
         for (const c of state._v93Cameos) {
+          if (c.roomId != null && (c.roomId !== curRoomId || c.levelIndex !== curLevel)) continue;
           let alpha = 0.78;
           if (c.phase === 'peek') alpha = 0.42 + 0.36 * Math.min(1, c.life / 0.42);
           else if (c.phase === 'flee') {
@@ -52140,7 +52158,9 @@ function drawHudBossMiniStats(p, layout) {
           color: color || '#bde7ff',
           r: N94(r, 18),
           age: 0,
-          damaged: false
+          damaged: false,
+          roomId: state.level && state.level.currentRoomId,
+          levelIndex: state.level && state.level.index
         });
         sys.stats.driftLanternsExploded += 1;
       } catch (err) { log94(err, 'spawnDriftExplosion'); }
@@ -52175,8 +52195,14 @@ function drawHudBossMiniStats(p, layout) {
         const exs = state._v94Explosions;
         if (!exs || !exs.length) return;
         const d = Math.min(0.08, Math.max(0, N94(dt, 0.016)));
+        const curLevel = state.level && state.level.index;
+        const curRoomId = state.level && state.level.currentRoomId;
         for (let i = exs.length - 1; i >= 0; i--) {
           const ex = exs[i];
+          if (ex.roomId != null && (ex.roomId !== curRoomId || ex.levelIndex !== curLevel)) {
+            exs.splice(i, 1);
+            continue;
+          }
           ex.age += d;
           if (ex.age >= 0.35 && !ex.damaged) {
             const p = state.player;
@@ -52184,7 +52210,7 @@ function drawHudBossMiniStats(p, layout) {
               const dist = Math.hypot(p.x - ex.x, p.y - ex.y);
               if (dist < ex.r * 4.4 + N94(p.r, 17)) {
                 try {
-                  if (typeof damagePlayer === 'function') damagePlayer(1, { sourceEnemyType: 'v94DriftLantern' });
+                  if (typeof damagePlayer === 'function') damagePlayer(1);
                   else if (typeof state.damagePlayer === 'function') state.damagePlayer(1);
                 } catch (_) {}
                 const dx = p.x - ex.x, dy = p.y - ex.y, dd = Math.hypot(dx, dy) || 1;
@@ -52201,9 +52227,12 @@ function drawHudBossMiniStats(p, layout) {
       try {
         const exs = state._v94Explosions;
         if (!exs || !exs.length) return;
+        const curLevel = state.level && state.level.index;
+        const curRoomId = state.level && state.level.currentRoomId;
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
         for (const ex of exs) {
+          if (ex.roomId != null && (ex.roomId !== curRoomId || ex.levelIndex !== curLevel)) continue;
           const ph = Math.min(1, ex.age / 0.55);
           const ringR = ex.r * (1.6 + 3.0 * ph);
           ctx.strokeStyle = rgba94('#dff6ff', 0.72 * (1 - ph));
@@ -52360,7 +52389,7 @@ function drawHudBossMiniStats(p, layout) {
             const p = state.player;
             if (p && Math.abs(p.x - b.x) < b.beamW * 0.5 + N94(p.r, 17) * 0.5) {
               try {
-                if (typeof damagePlayer === 'function') damagePlayer(b.damage, { sourceEnemyType: 'v94Tidefall' });
+                if (typeof damagePlayer === 'function') damagePlayer(b.damage);
                 else if (typeof state.damagePlayer === 'function') state.damagePlayer(b.damage);
               } catch (_) {}
               tf.hitCooldown = 0.55;
@@ -52447,20 +52476,27 @@ function drawHudBossMiniStats(p, layout) {
     function ensureCacheContents94(room) {
       try {
         if (!room || !room._v94CacheShrine || room._v94CacheReady) return;
-        // Drop one module pickup at center.
+        // Drop one module pickup at center. Modules must carry an
+        // itemId or grantItem ignores them on pickup.
         room.pickups = room.pickups || [];
-        room.pickups.push({
+        const moduleDrop = {
           type: 'module',
           x: N94(room.width, 1240) * 0.5,
           y: N94(room.height, 900) * 0.5,
-          vx: 0, vy: 0, r: 11,
+          vx: 0, vy: 0, r: 12,
           age: 0,
           bob: rand94(0, Math.PI * 2),
           remove: false,
           _v94CacheReward: true
-        });
+        };
+        if (typeof chooseBonusItem === 'function') {
+          try { moduleDrop.itemId = chooseBonusItem(); } catch (_) {}
+        }
+        room.pickups.push(moduleDrop);
         sys.stats.cacheRewardsDropped += 1;
-        // Spawn 2 Drift Lanterns flanking the reward.
+        // Spawn 2 Drift Lanterns flanking the reward. Initialize the
+        // _v94 state eagerly so the first frame of draw doesn't fall
+        // through to base drawEnemy with no sprite.
         if (typeof createEnemy === 'function' && registerDriftLantern94()) {
           const w = N94(room.width, 1240), h = N94(room.height, 900);
           for (let i = 0; i < 2; i++) {
@@ -52471,6 +52507,7 @@ function drawHudBossMiniStats(p, layout) {
               e.wakeRadius = Math.max(N94(e.wakeRadius, 0), 9999);
               e.wake = 9999;
               e._v94CacheGuard = true;
+              e._v94 = { age: 0, pulse: rand94(0, Math.PI * 2), aggression: 1 };
               room.enemies = room.enemies || [];
               if (!room.enemies.includes(e)) room.enemies.push(e);
               if (state.enemies && !state.enemies.includes(e)) state.enemies.push(e);
