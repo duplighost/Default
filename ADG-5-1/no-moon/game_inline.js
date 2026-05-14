@@ -50408,6 +50408,654 @@ function drawHudBossMiniStats(p, layout) {
     state.buildTag = V92_VERSION;
   })();
 
+
+  // ===================================================================
+  // === v93 — Captain Fang + Sun Finale polish ========================
+  // ===================================================================
+  // Captains gain teeth: bigger aura, breathing halo, on-spawn telegraph,
+  // a visible health bar, themed kill rewards, and a one-shot ghost cameo
+  // that flickers into the player's room from the captain's door the
+  // first time you walk next door. Sun finale gets two small but felt
+  // changes: on the FIRST Sun kill the crater briefly opens and leaks a
+  // cold glow before the lid grows in (so the player learns it exists);
+  // on subsequent kills the return sigil dims while the crater's glow
+  // intensifies, so the choice between the two reads correctly.
+  // ===================================================================
+  (function installV93FangAndFinale() {
+    const V93_VERSION = 'qual.fang-and-finale.2026-05-14.v93';
+    const CACHE93 = 'no-moon-fang-and-finale-v93';
+    if (typeof state === 'undefined' || !state) return;
+    if (state.v93FangAndFinale && state.v93FangAndFinale.installed) return;
+
+    const sys = state.v93FangAndFinale = {
+      installed: true,
+      version: V93_VERSION,
+      cacheExpected: CACHE93,
+      basedOn: 'Pro v92 polished + v93 captain mini-boss upgrade + Sun finale reveal.',
+      stats: {
+        captainsTelegraphed: 0,
+        captainCameos: 0,
+        captainKills: 0,
+        captainBonusSplinters: 0,
+        captainSpecialDrops: 0,
+        craterFirstReveals: 0,
+        sigilHierarchyDraws: 0,
+        lastError: null
+      }
+    };
+
+    function log93(e, where) {
+      try {
+        const msg = (where || 'v93') + ': ' + (e && (e.message || String(e)) || 'unknown');
+        sys.stats.lastError = msg;
+        console.warn('[No Moon v93]', msg, e);
+      } catch (_) {}
+    }
+    function N93(v, def) { const n = Number(v); return Number.isFinite(n) ? n : (def || 0); }
+    function rand93(a, b) { return a + Math.random() * (b - a); }
+    function rgba93(color, alpha) {
+      try {
+        if (typeof rgba === 'function') return rgba(color, alpha);
+        if (typeof color === 'string' && color[0] === '#') {
+          const v = color.slice(1);
+          const r = parseInt(v.length === 3 ? v[0] + v[0] : v.slice(0, 2), 16);
+          const g = parseInt(v.length === 3 ? v[1] + v[1] : v.slice(2, 4), 16);
+          const b = parseInt(v.length === 3 ? v[2] + v[2] : v.slice(4, 6), 16);
+          return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+        }
+      } catch (_) {}
+      return 'rgba(244,247,255,' + alpha + ')';
+    }
+
+    // Per-captain personality: each id gets a distinct visual scale +
+    // a themed reward. Bonus splinter clusters always drop on top.
+    const STYLE93 = {
+      bell_fed:        { sizeBoost: 1.18, auraR: 1.95, ringR: 1.62, special: 'repair',   bonusSplinters: 3 },
+      ash_drunk:       { sizeBoost: 1.22, auraR: 2.05, ringR: 1.68, special: 'splinter', bonusSplinters: 6 },
+      perched_witness: { sizeBoost: 1.10, auraR: 1.80, ringR: 1.56, special: 'module',   bonusSplinters: 3 },
+      doorbreaker:     { sizeBoost: 1.28, auraR: 2.10, ringR: 1.72, special: 'repair',   bonusSplinters: 4 },
+      saintless:       { sizeBoost: 1.14, auraR: 1.90, ringR: 1.60, special: 'module',   bonusSplinters: 3 }
+    };
+    function styleFor93(captain) {
+      return (captain && STYLE93[captain.id]) || STYLE93.bell_fed;
+    }
+
+    function ensureCaptainState93(enemy) {
+      if (!enemy._v93) {
+        enemy._v93 = {
+          telegraphT: 0,
+          auraPhase: rand93(0, Math.PI * 2),
+          spinPhase: rand93(0, Math.PI * 2),
+          maxHp: N93(enemy.hp, 1)
+        };
+        sys.stats.captainsTelegraphed += 1;
+      }
+      if ((!enemy._v93.maxHp || enemy._v93.maxHp < N93(enemy.hp, 0)) && enemy.hp) {
+        enemy._v93.maxHp = N93(enemy.hp, 1);
+      }
+      return enemy._v93;
+    }
+
+    function drawCaptainFang93(enemy) {
+      try {
+        if (!enemy || !enemy.captain || enemy.remove) return;
+        const cs = ensureCaptainState93(enemy);
+        const style = styleFor93(enemy.captain);
+        const t = N93(state.time, 0);
+        const color = enemy.captain.color || enemy.color || '#f4f7ff';
+        const r = N93(enemy.r, 14);
+
+        ctx.save();
+
+        // Telegraph ring: expands outward when the captain is first drawn.
+        if (cs.telegraphT < 1) {
+          cs.telegraphT = Math.min(1, cs.telegraphT + 0.018);
+          const flash = 1 - cs.telegraphT;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.strokeStyle = rgba93(color, 0.62 * flash);
+          ctx.lineWidth = 2 + 9 * flash;
+          ctx.beginPath();
+          ctx.arc(enemy.x, enemy.y, r * (1.6 + 3.8 * flash), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = rgba93(color, 0.34 * flash);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(enemy.x, enemy.y, r * (1.2 + 6.5 * flash), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Breathing outer halo.
+        const breathe = 0.78 + 0.22 * Math.sin(t * 2.6 + cs.auraPhase);
+        ctx.globalCompositeOperation = 'screen';
+        if (typeof drawSoftGlow === 'function') {
+          drawSoftGlow(ctx, enemy.x, enemy.y, r * style.auraR * breathe, color, 0.22, 0.05, 0);
+        } else {
+          ctx.fillStyle = rgba93(color, 0.18 * breathe);
+          ctx.beginPath();
+          ctx.arc(enemy.x, enemy.y, r * style.auraR * breathe, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Inner crown ring with a slow rotational pulse.
+        ctx.globalCompositeOperation = 'source-over';
+        cs.spinPhase += 0.012;
+        const ringR = r * style.ringR + Math.sin(t * 3.2 + cs.auraPhase) * 1.6;
+        ctx.strokeStyle = rgba93(color, 0.62);
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(enemy.x, enemy.y, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Four orbiting glyph dots.
+        ctx.fillStyle = rgba93(color, 0.82);
+        for (let i = 0; i < 4; i++) {
+          const a = cs.spinPhase + i * Math.PI / 2;
+          const px = enemy.x + Math.cos(a) * ringR;
+          const py = enemy.y + Math.sin(a) * ringR;
+          ctx.beginPath();
+          ctx.arc(px, py, 1.6 + (i % 2) * 0.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Health bar above title.
+        if (cs.maxHp > 0 && N93(enemy.hp, cs.maxHp) < cs.maxHp) {
+          const barW = r * 2.6;
+          const barH = 3;
+          const bx = enemy.x - barW / 2;
+          const by = enemy.y - r * 2.1;
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+          ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+          const pct = Math.max(0, Math.min(1, N93(enemy.hp, cs.maxHp) / cs.maxHp));
+          ctx.fillStyle = rgba93(color, 0.92);
+          ctx.fillRect(bx, by, barW * pct, barH);
+        }
+
+        ctx.restore();
+      } catch (e) { log93(e, 'drawCaptainFang'); }
+    }
+
+    // ----- Wrap drawEnemy so the fang draws ON TOP of the existing
+    // base + future-consequence captain marker. The earlier wrap stays;
+    // ours runs after it.
+    if (typeof drawEnemy === 'function' && !drawEnemy.__v93CaptainFang) {
+      const baseDrawEnemy93 = drawEnemy;
+      drawEnemy = function drawEnemyV93(enemy) {
+        const out = baseDrawEnemy93.apply(this, arguments);
+        try {
+          if (enemy && enemy.captain && !enemy.remove) drawCaptainFang93(enemy);
+        } catch (e) { log93(e, 'drawEnemyWrap'); }
+        return out;
+      };
+      drawEnemy.__v93CaptainFang = true;
+    }
+
+    // ----- Captain rewards: spawn a themed special drop + a bonus
+    // splinter cluster the moment a captain enemy actually dies. Wrap
+    // killEnemy so we run AFTER all the older kill paths have settled
+    // (so splinters scattered by base code don't conflict with ours).
+    function pushPickup93(room, p) {
+      if (!room) return false;
+      try {
+        room.pickups = room.pickups || [];
+        const target = (state.level && state.level.rooms && state.level.rooms[state.level.currentRoomId] === room && Array.isArray(state.pickups)) ? state.pickups : room.pickups;
+        target.push(p);
+        if (target !== room.pickups) room.pickups = target;
+        return true;
+      } catch (e) { log93(e, 'pushPickup'); return false; }
+    }
+    function dropCaptainReward93(enemy, room) {
+      try {
+        if (!enemy || !enemy.captain || !room) return;
+        const style = styleFor93(enemy.captain);
+        const cx = N93(enemy.x, room.width * 0.5);
+        const cy = N93(enemy.y, room.height * 0.5);
+        // Bonus splinter cluster.
+        for (let i = 0; i < style.bonusSplinters; i++) {
+          const a = rand93(0, Math.PI * 2);
+          const speed = rand93(60, 170);
+          pushPickup93(room, {
+            type: 'splinter',
+            x: cx + Math.cos(a) * rand93(0, 18),
+            y: cy + Math.sin(a) * rand93(0, 18),
+            vx: Math.cos(a) * speed,
+            vy: Math.sin(a) * speed,
+            r: 8,
+            age: 0,
+            bob: rand93(0, Math.PI * 2),
+            magnetDelay: rand93(0.10, 0.28),
+            remove: false,
+            _v93Captain: true
+          });
+          sys.stats.captainBonusSplinters += 1;
+        }
+        // Themed special drop (single, near corpse). 'splinter' style id
+        // just means "more splinters" — fall through.
+        if (style.special !== 'splinter') {
+          const a = rand93(0, Math.PI * 2);
+          pushPickup93(room, {
+            type: style.special,
+            x: cx + Math.cos(a) * 18,
+            y: cy + Math.sin(a) * 18,
+            vx: 0,
+            vy: 0,
+            r: style.special === 'repair' ? 10 : 11,
+            age: 0,
+            bob: rand93(0, Math.PI * 2),
+            remove: false,
+            _v93Captain: true
+          });
+          sys.stats.captainSpecialDrops += 1;
+        }
+      } catch (e) { log93(e, 'dropCaptainReward'); }
+    }
+
+    if (typeof killEnemy === 'function' && !killEnemy.__v93CaptainReward) {
+      const baseKill93 = killEnemy;
+      killEnemy = function killEnemyV93(enemy, bullet) {
+        const wasCaptain = !!(enemy && enemy.captain && !enemy.remove);
+        const captainHere = wasCaptain ? enemy.captain : null;
+        const xBefore = wasCaptain ? N93(enemy.x, 0) : 0;
+        const yBefore = wasCaptain ? N93(enemy.y, 0) : 0;
+        const out = baseKill93.apply(this, arguments);
+        try {
+          if (wasCaptain) {
+            const room = state.level && state.level.rooms ? state.level.rooms[state.level.currentRoomId] : null;
+            if (room) dropCaptainReward93({ captain: captainHere, x: xBefore, y: yBefore }, room);
+            sys.stats.captainKills += 1;
+          }
+        } catch (e) { log93(e, 'killEnemyWrap'); }
+        return out;
+      };
+      killEnemy.__v93CaptainReward = true;
+    }
+
+    // ----- Captain cameo: when the player enters a room adjacent to a
+    // captain room (and we haven't shown the cameo yet for that captain
+    // this run), spawn a one-shot ghost silhouette that peeks into the
+    // player's room from the door to the captain's room and darts back.
+    // Pure visual — no collision, no AI hooks on the real captain.
+    state._v93Cameos = state._v93Cameos || [];
+    state._v93CameoSeenIds = state._v93CameoSeenIds || {};
+
+    function captainOfRoom93(room) {
+      try {
+        if (!room || !Array.isArray(room.enemies)) return null;
+        for (const e of room.enemies) {
+          if (e && e.captain && !e.remove) return e;
+        }
+      } catch (_) {}
+      return null;
+    }
+    function doorCenter93(room, side) {
+      const w = N93(room.width, 1240);
+      const h = N93(room.height, 900);
+      const wall = N93(room.wall, 24);
+      if (side === 'n') return { x: w * 0.5, y: wall * 0.5 };
+      if (side === 's') return { x: w * 0.5, y: h - wall * 0.5 };
+      if (side === 'e') return { x: w - wall * 0.5, y: h * 0.5 };
+      return { x: wall * 0.5, y: h * 0.5 };
+    }
+    function inwardOffset93(side, dist) {
+      if (side === 'n') return { x: 0, y: dist };
+      if (side === 's') return { x: 0, y: -dist };
+      if (side === 'e') return { x: -dist, y: 0 };
+      return { x: dist, y: 0 };
+    }
+    function maybeSpawnCameos93(level, room) {
+      try {
+        if (!level || !room || !Array.isArray(room.doors)) return;
+        for (const door of room.doors) {
+          const target = level.rooms[door.to];
+          if (!target) continue;
+          const captain = captainOfRoom93(target);
+          if (!captain || !captain.captain) continue;
+          const id = (captain.captain.id || 'cap') + ':L' + level.index + ':R' + target.id;
+          if (state._v93CameoSeenIds[id]) continue;
+          state._v93CameoSeenIds[id] = true;
+          const center = doorCenter93(room, door.side);
+          const inward = inwardOffset93(door.side, 36);
+          state._v93Cameos.push({
+            doorSide: door.side,
+            captainId: captain.captain.id,
+            color: captain.captain.color || captain.color || '#f4f7ff',
+            r: N93(captain.r, 14) * 0.92,
+            ox: center.x,
+            oy: center.y,
+            x: center.x,
+            y: center.y,
+            targetX: center.x + inward.x * 2.4,
+            targetY: center.y + inward.y * 2.4,
+            life: 0,
+            phase: 'peek',   // peek (move inward) -> linger -> flee (back to door)
+            maxLife: 1.4,
+            seen: false
+          });
+          sys.stats.captainCameos += 1;
+        }
+      } catch (e) { log93(e, 'maybeSpawnCameos'); }
+    }
+    function updateCameos93(dt) {
+      try {
+        if (!state._v93Cameos || !state._v93Cameos.length) return;
+        const d = Math.max(0, Math.min(0.08, N93(dt, 0.016)));
+        for (let i = state._v93Cameos.length - 1; i >= 0; i--) {
+          const c = state._v93Cameos[i];
+          c.life += d;
+          if (c.phase === 'peek') {
+            const t = Math.min(1, c.life / 0.42);
+            const e = 1 - Math.pow(1 - t, 2);
+            c.x = c.ox + (c.targetX - c.ox) * e;
+            c.y = c.oy + (c.targetY - c.oy) * e;
+            if (t >= 1) c.phase = 'linger';
+          } else if (c.phase === 'linger') {
+            if (c.life > 0.62) { c.phase = 'flee'; c._fleeStart = c.life; }
+          } else if (c.phase === 'flee') {
+            const t = Math.min(1, (c.life - (c._fleeStart || 0.62)) / 0.36);
+            const e = t * t;
+            c.x = c.targetX + (c.ox - c.targetX) * e;
+            c.y = c.targetY + (c.oy - c.targetY) * e;
+            if (t >= 1) {
+              state._v93Cameos.splice(i, 1);
+              continue;
+            }
+          }
+          if (c.life > c.maxLife + 0.5) state._v93Cameos.splice(i, 1);
+        }
+      } catch (e) { log93(e, 'updateCameos'); }
+    }
+    function drawCameos93() {
+      try {
+        if (!state._v93Cameos || !state._v93Cameos.length) return;
+        const t = N93(state.time, 0);
+        ctx.save();
+        for (const c of state._v93Cameos) {
+          let alpha = 0.78;
+          if (c.phase === 'peek') alpha = 0.42 + 0.36 * Math.min(1, c.life / 0.42);
+          else if (c.phase === 'flee') {
+            const ft = Math.min(1, (c.life - (c._fleeStart || 0.62)) / 0.36);
+            alpha = 0.78 * (1 - ft);
+          }
+          ctx.globalCompositeOperation = 'screen';
+          if (typeof drawSoftGlow === 'function') {
+            drawSoftGlow(ctx, c.x, c.y, c.r * 2.4, c.color, 0.26 * alpha, 0.06, 0);
+          }
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = rgba93('#02040a', 0.78 * alpha);
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = rgba93(c.color, 0.86 * alpha);
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+          // A small uncertain glyph above the silhouette.
+          ctx.strokeStyle = rgba93(c.color, 0.78 * alpha);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(c.x - c.r * 0.34, c.y - c.r * 1.32);
+          ctx.lineTo(c.x - c.r * 0.06, c.y - c.r * 1.58);
+          ctx.lineTo(c.x + c.r * 0.12, c.y - c.r * 1.36);
+          ctx.lineTo(c.x + c.r * 0.36, c.y - c.r * 1.58);
+          ctx.stroke();
+          // Trailing wisps.
+          for (let i = 0; i < 3; i++) {
+            const ang = t * 3 + i * 1.9;
+            const tr = c.r * (0.55 + 0.18 * i);
+            ctx.fillStyle = rgba93(c.color, 0.22 * alpha);
+            ctx.beginPath();
+            ctx.arc(c.x + Math.cos(ang) * tr, c.y + Math.sin(ang) * tr * 0.5, 1.4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      } catch (e) { log93(e, 'drawCameos'); }
+    }
+
+    // ----- Wrap syncActiveRoom POST-base so cameos initialize on each
+    // room entry. Wrap updateGame for cameo tick. Wrap drawAmbientWorld
+    // for the cameo draw pass (after base so they sit above the floor).
+    if (typeof syncActiveRoom === 'function' && !syncActiveRoom.__v93Cameo) {
+      const baseSync93 = syncActiveRoom;
+      syncActiveRoom = function syncActiveRoomV93(level, roomId, fromSide) {
+        const out = baseSync93.apply(this, arguments);
+        try {
+          const room = level && level.rooms ? level.rooms[roomId] : null;
+          if (room) maybeSpawnCameos93(level, room);
+        } catch (e) { log93(e, 'syncActiveRoomWrap'); }
+        return out;
+      };
+      syncActiveRoom.__v93Cameo = true;
+    }
+    if (typeof updateGame === 'function' && !updateGame.__v93Cameo) {
+      const baseUpdate93 = updateGame;
+      updateGame = function updateGameV93(dt) {
+        const out = baseUpdate93.apply(this, arguments);
+        try { updateCameos93(dt); } catch (e) { log93(e, 'updateGameWrap'); }
+        return out;
+      };
+      updateGame.__v93Cameo = true;
+    }
+    if (typeof drawAmbientWorld === 'function' && !drawAmbientWorld.__v93Cameo) {
+      const baseAmbient93 = drawAmbientWorld;
+      drawAmbientWorld = function drawAmbientWorldV93(level) {
+        const out = baseAmbient93.apply(this, arguments);
+        try { drawCameos93(); } catch (e) { log93(e, 'drawAmbientWrap'); }
+        return out;
+      };
+      drawAmbientWorld.__v93Cameo = true;
+    }
+
+    // ===================================================================
+    // SUN FINALE POLISH
+    // -------------------------------------------------------------------
+    // Two changes wrapped over v77's existing crater + sigil draws:
+    //   (1) On the FIRST Sun kill, the crater briefly opens — a pre-seal
+    //       reveal that shows the cold-blue particles for ~0.6s before
+    //       v77's brown lid grows in. Teaches the player the crater is
+    //       a real place to come back to, while they're on their way out
+    //       this run.
+    //   (2) When the crater is OPEN and active (re-runs), the v77 Return
+    //       Sigil dims and shrinks slightly and the crater's particle
+    //       glow brightens — so the choice between "end the run" and
+    //       "go to the Drowned Sky" reads correctly and the player
+    //       doesn't run for the sigil out of habit.
+    // ===================================================================
+
+    state._v93CraterFirstShownAt = state._v93CraterFirstShownAt || {};
+
+    if (state.v77DrawSunCrater && !state.v77DrawSunCrater.__v93Reveal) {
+      const baseCraterDraw93 = state.v77DrawSunCrater;
+      state.v77DrawSunCrater = function drawCraterV93(room) {
+        try {
+          const c = room && room._v77SunCrater;
+          if (!c) return baseCraterDraw93(room);
+          // First-reveal: while sealed, suppress v77's lid grow and draw
+          // an "open" preview for ~0.6s, then hand over to the base draw
+          // for the lid animation. We track the start time per room so a
+          // second crater on a different floor still gets its reveal.
+          const id = 'L' + (state.level && state.level.index != null ? state.level.index : 'x') + ':R' + (room.id != null ? room.id : 'x');
+          if (c.sealed && c.firstClear) {
+            if (state._v93CraterFirstShownAt[id] == null) {
+              state._v93CraterFirstShownAt[id] = N93(state.time, 0);
+              sys.stats.craterFirstReveals += 1;
+            }
+            const elapsed = Math.max(0, N93(state.time, 0) - N93(state._v93CraterFirstShownAt[id], 0));
+            if (elapsed < 0.62) {
+              // Open-preview pass: dark ellipse + cold-blue sparkles, no lid.
+              ctx.save();
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.fillStyle = 'rgba(0,0,0,0.86)';
+              ctx.beginPath();
+              ctx.ellipse(c.x, c.y, c.r * 1.22, c.r * 0.52, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.globalCompositeOperation = 'screen';
+              ctx.strokeStyle = 'rgba(189,231,255,0.62)';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.ellipse(c.x, c.y, c.r * 1.26, c.r * 0.56, 0, 0, Math.PI * 2);
+              ctx.stroke();
+              const t = N93(state.time, 0);
+              const bloom = Math.min(1, elapsed / 0.42);
+              for (let i = 0; i < 22; i++) {
+                const a = i * Math.PI * 2 / 22 + t * 0.18;
+                const rr = c.r * (0.18 + ((i * 41) % 13) / 13 * 0.92) * bloom;
+                ctx.fillStyle = i % 3 ? 'rgba(189,231,255,' + (0.32 * bloom).toFixed(3) + ')' : 'rgba(246,220,255,' + (0.34 * bloom).toFixed(3) + ')';
+                ctx.beginPath();
+                ctx.arc(c.x + Math.cos(a) * rr, c.y + Math.sin(a) * rr * 0.38, 1.6 + (i % 2), 0, Math.PI * 2);
+                ctx.fill();
+              }
+              // A single bright leak straight up out of the crater.
+              const leak = Math.min(1, elapsed / 0.30);
+              ctx.globalCompositeOperation = 'screen';
+              ctx.fillStyle = 'rgba(189,231,255,' + (0.42 * (1 - leak)).toFixed(3) + ')';
+              ctx.beginPath();
+              ctx.ellipse(c.x, c.y - 24 * leak, c.r * 0.38, c.r * 0.18, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+              return;
+            }
+            // After the preview, suppress the lid's first 0.6s of growth
+            // so v77's brown lid grows in starting now (not from before).
+            // We do that by clamping c.sealT to a value tied to elapsed.
+            if (elapsed < 2.4) {
+              c.sealT = Math.min(c.sealT, Math.max(0, (elapsed - 0.62) * 0.42));
+            }
+          }
+          return baseCraterDraw93(room);
+        } catch (e) { log93(e, 'craterDraw'); return baseCraterDraw93(room); }
+      };
+      state.v77DrawSunCrater.__v93Reveal = true;
+    }
+
+    if (state.v77DrawSunReturnSigil && !state.v77DrawSunReturnSigil.__v93Hierarchy) {
+      const baseSigilDraw93 = state.v77DrawSunReturnSigil;
+      state.v77DrawSunReturnSigil = function drawSigilV93(room) {
+        try {
+          const sigil = room && room._v77SunReturnSigil;
+          const crater = room && room._v77SunCrater;
+          // If the crater is open AND the sigil is still active, draw a
+          // dimmed/shrunken version of the sigil so the open crater
+          // reads as the "interesting" choice.
+          if (sigil && sigil.active && crater && crater.open && !crater.sealed) {
+            sys.stats.sigilHierarchyDraws += 1;
+            const t = N93(state.time, 0);
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            const pulse = 0.42 + 0.18 * Math.sin(t * 2.2);
+            ctx.strokeStyle = 'rgba(223,246,255,' + (0.22 + 0.10 * pulse).toFixed(3) + ')';
+            ctx.lineWidth = 2;
+            const sr = sigil.r * 0.82;
+            ctx.beginPath(); ctx.arc(sigil.x, sigil.y, sr, 0, Math.PI * 2); ctx.stroke();
+            ctx.strokeStyle = 'rgba(246,220,255,0.20)';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.moveTo(sigil.x, sigil.y - sr * 0.62);
+            ctx.lineTo(sigil.x, sigil.y + sr * 0.62);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(sigil.x, sigil.y, sr * 0.32, -Math.PI * 0.5, Math.PI * 1.5);
+            ctx.stroke();
+            ctx.restore();
+            return;
+          }
+          return baseSigilDraw93(room);
+        } catch (e) { log93(e, 'sigilDraw'); return baseSigilDraw93(room); }
+      };
+      state.v77DrawSunReturnSigil.__v93Hierarchy = true;
+    }
+
+    // ===================================================================
+    // Tag + debug.
+    // ===================================================================
+    function tag93() {
+      try {
+        let changed = false;
+        if (state.buildTag !== V93_VERSION) { state.buildTag = V93_VERSION; changed = true; }
+        if (typeof document !== 'undefined') {
+          const tag = document.getElementById('buildTagDisplay');
+          const desired = 'build: ' + V93_VERSION;
+          if (tag && tag.textContent !== desired) { tag.textContent = desired; changed = true; }
+          if (document.documentElement && document.documentElement.dataset.noMoonBuild !== V93_VERSION) {
+            document.documentElement.dataset.noMoonBuild = V93_VERSION;
+            changed = true;
+          }
+        }
+        return changed;
+      } catch (_) { return false; }
+    }
+
+    state.v93Debug = function v93Debug() {
+      let prior = null;
+      try { prior = typeof state.v92Debug === 'function' ? state.v92Debug() : null; } catch (_) {}
+      tag93();
+      const room = state.level && state.level.rooms ? state.level.rooms[state.level.currentRoomId] : null;
+      const captainHere = room ? (Array.isArray(room.enemies) ? room.enemies.find(function (e) { return e && e.captain && !e.remove; }) : null) : null;
+      return {
+        version: V93_VERSION,
+        buildTag: state.buildTag,
+        cacheExpected: CACHE93,
+        mode: state.mode,
+        captainInRoom: captainHere ? { id: captainHere.captain.id, title: captainHere.captain.title, hp: captainHere.hp } : null,
+        activeCameos: (state._v93Cameos || []).length,
+        cameoSeenCount: Object.keys(state._v93CameoSeenIds || {}).length,
+        craterFirstShown: Object.keys(state._v93CraterFirstShownAt || {}).length,
+        stats: Object.assign({}, sys.stats),
+        prior: prior
+      };
+    };
+
+    state.v93SelfTest = function v93SelfTest() {
+      const out = { version: V93_VERSION };
+      const run = function (name, fn) {
+        try { out[name] = fn(); }
+        catch (e) { out[name] = { ok: false, error: String(e && (e.message || e)) }; }
+      };
+      run('boot', function () {
+        tag93();
+        return { ok: state.buildTag === V93_VERSION, tag: state.buildTag, cache: CACHE93 };
+      });
+      run('captainReward', function () {
+        // Synthetic captain death -> verify a splinter and a special drop land.
+        const room = state.level && state.level.rooms ? state.level.rooms[state.level.currentRoomId] : null;
+        if (!room) return { ok: true, skipped: 'no-room' };
+        const before = Array.isArray(room.pickups) ? room.pickups.length : 0;
+        dropCaptainReward93({ captain: { id: 'bell_fed', color: '#f2cf6e' }, x: N93(room.width, 1240) * 0.5, y: N93(room.height, 900) * 0.5 }, room);
+        const after = Array.isArray(room.pickups) ? room.pickups.length : 0;
+        // Splinter count is style.bonusSplinters + 1 special drop.
+        const expected = STYLE93.bell_fed.bonusSplinters + (STYLE93.bell_fed.special === 'splinter' ? 0 : 1);
+        return { ok: after - before === expected, before: before, after: after, expected: expected };
+      });
+      run('cameoIdempotent', function () {
+        // Re-running maybeSpawnCameos for the same room shouldn't double up.
+        const level = state.level;
+        const room = level && level.rooms ? level.rooms[level.currentRoomId] : null;
+        if (!room) return { ok: true, skipped: 'no-room' };
+        const before = (state._v93Cameos || []).length;
+        maybeSpawnCameos93(level, room);
+        maybeSpawnCameos93(level, room);
+        const after = (state._v93Cameos || []).length;
+        return { ok: after - before <= (Array.isArray(room.doors) ? room.doors.length : 4), before: before, after: after };
+      });
+      out.ok = Object.keys(out).filter(function (k) { return k !== 'version' && k !== 'ok'; }).every(function (k) { return out[k] && out[k].ok !== false; });
+      tag93();
+      return out;
+    };
+
+    try {
+      tag93();
+      setTimeout(function () { try { tag93(); } catch (_) {} }, 0);
+      setTimeout(function () { try { tag93(); } catch (_) {} }, 400);
+      if (typeof window !== 'undefined') {
+        window.__NO_MOON_V93_FANG_AND_FINALE__ = sys;
+        window.noMoonV93Debug = function () { return state.v93Debug(); };
+        window.noMoonV93SelfTest = function () { return state.v93SelfTest(); };
+        window.noMoonCurrentDebug = window.noMoonV93Debug;
+        window.noMoonCurrentSelfTest = window.noMoonV93SelfTest;
+      }
+    } catch (e) { log93(e, 'install'); }
+    state.buildTag = V93_VERSION;
+  })();
+
   renderCodexStats();
 
 })();

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'no-moon-claude-reconciled-polished-netlify-v92';
+const CACHE_NAME = 'no-moon-fang-and-finale-v93';
 const ASSETS = [
   './',
   './index.html',
