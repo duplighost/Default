@@ -53582,6 +53582,17 @@ function drawHudBossMiniStats(p, layout) {
           state._v39SunVictoryHandoff = false;
           state._v39SunPathCompletedThisWin = false;
           state._v39MoonPathActive = false;
+          // The deferred shrine flag is set when commitRunSummary on
+          // run 1 decides to route a win through the moon path. If
+          // that flag persists to run 2 (where conditions may differ),
+          // the shrine flow can skip or misfire. Always reset.
+          state._v39DeferredMoonPathFromShrine = false;
+          // v59 sky-branch decorative flags. Per-run only; safer to
+          // clear so prior-run choices don't bleed visuals into a
+          // fresh run.
+          state._v59SkyBranchChosen = false;
+          state._v59SkyBranchCompleted = false;
+          state._v59SkyBranchDeclined = false;
         } catch (e) { logErr('Progress.resetPerRunFlags', e); }
       }
     };
@@ -53729,22 +53740,24 @@ function drawHudBossMiniStats(p, layout) {
             }
           }
         } catch (_) {}
-        // v211 boolean fallback: if ANY save mirror tells us the player
-        // has defeated the sun boss, we treat the clear count as >= 1.
-        // This is what lets the crater spawn OPEN on a second run even
-        // when localStorage has been wiped (cache clear, incognito).
+        // Boolean fallback: if ANY save mirror reports that the sun
+        // boss has been defeated, take that as proof of at least one
+        // clear. Always check — even if a numeric counter exists, a
+        // boolean somewhere else is harder to lose to storage drift.
         try {
-          if (n === 0){
-            const sb = (state.save && state.save.defeatedBosses) || {};
-            if (sb.sunCore) n = 1;
-            if (n === 0 && typeof localStorage !== 'undefined'){
+          let sawSunBossDefeated = false;
+          const sb = (state.save && state.save.defeatedBosses) || {};
+          if (sb.sunCore) sawSunBossDefeated = true;
+          if (!sawSunBossDefeated && typeof localStorage !== 'undefined'){
+            try {
               const raw = localStorage.getItem('noMoonProgress_v68');
               if (raw){
                 const m = JSON.parse(raw) || {};
-                if (m.defeatedBosses && m.defeatedBosses.sunCore) n = 1;
+                if (m.defeatedBosses && m.defeatedBosses.sunCore) sawSunBossDefeated = true;
               }
-            }
+            } catch (_) {}
           }
+          if (sawSunBossDefeated) n = Math.max(n, 1);
         } catch (_) {}
         return Math.max(0, Math.floor(n));
       },
