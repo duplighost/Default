@@ -5772,7 +5772,7 @@ document.addEventListener('pointerdown', (ev) => {
     enemy.remove = true;
     playDeathSound(enemy.boss);
     state.stats.kills += 1;
-    spawnSpark(enemy.x, enemy.y, enemy.color, enemy.boss ? 30 : 14, enemy.boss ? 260 : 150);
+    spawnSpark(enemy.x, enemy.y, enemy.color, enemy.boss ? 14 : 5, enemy.boss ? 220 : 120);
     spawnRing(enemy.x, enemy.y, enemy.color, enemy.boss ? 120 : 34);
     shake(enemy.boss ? 12 : 4);
 
@@ -54908,6 +54908,20 @@ function drawHudBossMiniStats(p, layout) {
             }
           }
           Combat.tickMiniBossWaves(room);
+          // Mobile particle cap: hard ceiling on state.particles so
+          // chain detonations (volatile shard + cascading enemy
+          // deaths) can't blow the array up and stall the compositor.
+          // Drops oldest first.
+          if (typeof window !== 'undefined' && Array.isArray(state.particles)){
+            const isMobile = (('ontouchstart' in window) ||
+              (typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0)) &&
+              ((window.innerWidth || 9999) < 900 || (typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod|Mobile Safari/i.test(String(navigator.userAgent || ''))));
+            if (isMobile && state.particles.length > 50){
+              state.particles.sort(function(a, b){ return (a && a.life || 0) - (b && b.life || 0); });
+              state.particles.splice(0, state.particles.length - 50);
+              NM.stats.particlesCulled = (NM.stats.particlesCulled || 0) + 1;
+            }
+          }
           tagBuild();
         } catch (e) { err('updateGame post', e); }
         return out;
