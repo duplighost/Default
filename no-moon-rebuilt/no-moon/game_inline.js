@@ -53702,24 +53702,14 @@ function drawHudBossMiniStats(p, layout) {
               hz.driftY = vy / sp * maxSpeed;
               NM.stats.hazardDriftCaps += 1;
             }
-            // Repulsion ONLY for hazards that are actually moving toward
-            // the player (i.e., the ones we were worried about gluing).
-            // Stationary hazards must NOT be pushed around — that was
-            // causing the visible jitter ("going crazy before you
-            // touch a floor thing that hurts") as the player approached.
-            const moving = Math.hypot(n(hz.driftX, 0), n(hz.driftY, 0)) > 1;
-            if (moving){
-              const d = dist(p.x, p.y, hz.x, hz.y);
-              const near = n(hz.r, 40) * 0.42 + n(p.r, 17);
-              if (d > 0.001 && d < near){
-                const push = (near - d) * 0.055;
-                hz.x -= (p.x - hz.x) / d * push;
-                hz.y -= (p.y - hz.y) / d * push;
-                hz.driftX *= 0.45;
-                hz.driftY *= 0.45;
-                NM.stats.hazardSoftens += 1;
-              }
-            }
+            // Repulsion removed. The drift cap (20 px/sec, set above)
+            // already prevents spores from catching the player at ~250
+            // px/sec walk speed. The push was solving a problem from an
+            // older 90 px/sec homing speed that no longer exists. And it
+            // had a real cost: stationary hazards visibly jittered as
+            // the player approached, which made the floor feel unstable.
+            // Spores still damage/slow you on actual contact, which is
+            // the intended gameplay.
           }
           return true;
         } catch (e) { err('Hazards.softenInRoom', e); return false; }
