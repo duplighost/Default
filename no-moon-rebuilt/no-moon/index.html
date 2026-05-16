@@ -54623,19 +54623,22 @@ function drawHudBossMiniStats(p, layout) {
     // ╔═════════════════════════════════════════════════════════════╗
     // ║   MODULE: Hazards                                           ║
     // ║                                                             ║
-    // ║   Softens the most aggressive hazards:                      ║
+    // ║   Two behaviors:                                            ║
     // ║                                                             ║
-    // ║   - Cap spore/snare drift speed at 20 px/sec. The v101      ║
-    // ║     patch I added earlier set this to 90, which made        ║
-    // ║     "homing" hazards glue to the player. 20 is a gentle    ║
-    // ║     drift, still does its slow effect, but doesn't follow. ║
-    // ║   - Repulsion: when a spore/snare gets too close to the    ║
-    // ║     player, push it AWAY a little. Stops the "stuck on me" ║
-    // ║     follow-forever behavior the user reported.             ║
+    // ║   1. Snare / lotus hazards have driftX/driftY forced to 0   ║
+    // ║      every frame. The engine's spawn code (line 9739) gives ║
+    // ║      every new hazard a random initial drift of -8..+8      ║
+    // ║      px/sec, which makes snare/lotus visually wander even   ║
+    // ║      though they're supposed to be stationary. Zeroing the  ║
+    // ║      drift fixes "the floor is moving on its own" jitter.   ║
     // ║                                                             ║
-    // ║   NOTE: this module does NOT call `primeOnEntry` from the   ║
-    // ║   updateGame tick. That was the v210 bug. Entry priming    ║
-    // ║   stays in syncActiveRoom only.                            ║
+    // ║   2. Spore drift speed capped at 20 px/sec. Spores ARE      ║
+    // ║      designed to move (they're "homing motes"). The cap     ║
+    // ║      prevents the v101-era 90 px/sec speed that made them   ║
+    // ║      glue to the player.                                    ║
+    // ║                                                             ║
+    // ║   No repulsion. No per-frame primeOnEntry call. Both were   ║
+    // ║   prior wrong-direction fixes that have been removed.       ║
     // ║                                                             ║
     // ╚═════════════════════════════════════════════════════════════╝
 
