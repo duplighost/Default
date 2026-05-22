@@ -1,84 +1,77 @@
-# No Moon — v266 clean title/reveal audit (+ SFX/BGM splash fix)
+# No Moon — v266b mobile splash fix (on top of v266 clean title/reveal audit)
 
-Build tag: `qual.v266-clean-title-reveal-audit.2026-05-21.v266`
+Build tag: `qual.v266b-mobile-splash-fix.2026-05-22.v266b`
 Zip: `no-moon-rebuilt-v266-clean-title-reveal-audit.zip`
-SHA256: `cc43cb661410db923c5f65228fcaf40237b6cf108f0cffef454bca8cf68a1a94`
+SHA256: `95167f7f7256d81ce7b0ac095578bc5d278f80386e5f989e1597c1999cd1a2ab`
 
-## What changed vs the bad v265 (`canonical-title-first-walker`)
+## Why v266b
 
-- Deleted the v265 canonical title controller, including:
-  - the "Passenger List" front-door button label
-  - the "the front door remembers" eyebrow + explanatory copy
-  - the `v265-canonical-title-css` style block
-  - the `__v265CanonicalTitleControllerInstalled` runtime flag and all nine guard sites in v66/v70/v72/v73/v92/v251/v258/v259 that referenced it
-  - the `window.noMoonStartButtonDispatch` shim and its capture listeners on `#startBtn` / `#codexBtn` / `#characterGrid`
-- Replaced the core `startBtn` click handler and the keyboard Enter/Space handler in `no-moon/index.html:3672` with a plain core state machine:
-  - `basePassengerSelectOpen265()` reports whether passenger select is currently visible.
-  - `openPassengerSelectCore265()` performs the splash → select transition.
-  - `handleCoreStartButton265(ev, reason)` is the single dispatcher: a splash click opens passenger select; a select click starts the run.
-- Exposed `state._v251BeginReveal` / `state._v251ArmRevealPrompt` so reveal can be invoked directly. Reveal no longer fakes a `startBtn.click()`.
-- `v257` auto-reveal: stale flag clear + direct `state._v251BeginReveal('v257-auto-trigger')` instead of synthesised button clicks.
-- `v260` `maybeAutoStartReveal`: early-exit + clear `_v251RevealPromptArmed`, `_v260EndingAutoArmedAt`, `_v260EndingAutoStarted` when we are on the title screen with no real final-win evidence. Prevents the moon-reveal loop on title return.
-- `v260` `finalWinLike()`: removed `_v251RevealPromptArmed` and `_v251Reveal.armed` from the evidence list so an armed prompt alone no longer marks the engine as "in win flow".
-- `v261` `forceStartReveal` gated on `!(state.mode === 'title' && state.overlayMode === 'title')`.
+Mobile testing of v266 reported: the title screen "doesn't fit", the START button is hard to hit, and scrolling on/after the screen reveals "another image". Three root causes identified in ChatGPT's v266 CSS:
 
-## What changed vs ChatGPT's v266 (this build)
+1. `.panel { position: fixed; width: 100vw; height: 100vh }` on the splash — `100vh` on mobile includes the URL bar, so the panel was taller than the visible viewport. Combined with the overlay's `overflow-y: auto`, this made the splash scrollable when it shouldn't have been.
+2. `.actions { top: 74% }` — percent-of-viewport positioning of the START button drifts as the URL bar shows/hides on mobile. Tapping where the button used to be sometimes lands on the background, not the button.
+3. On the passenger-select screen, the title-art is still painted as the `#overlay` background (`v65TitleArt`). The panel scrolls inside the overlay with `align-items: flex-start`, and when content exceeds viewport, scrolling reveals the title-art image below the panel — the "another image" the tester saw.
 
-Single targeted fix on top of ChatGPT's v266:
+## v266b fixes (CSS-only, inside the existing `installV266CleanTitlePresentation` block)
 
-- Added one CSS override inside the existing `v266-clean-title-css` block to restore SFX/BGM toggle visibility on the splash:
+### Splash
 
-```css
-body.v66SplashActive #audioToggle,
-body.v66SplashActive #musicToggle {
-  display: inline-flex !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
-```
+- `.panel`: switched from `position: fixed; height: 100vh` to `position: absolute; height: 100%`. Absolute positions relative to `#overlay` (which is already viewport-pinned via `position: fixed; inset: 0`), so the panel always matches the *actual* visible viewport, never the inflated `100vh`.
+- `#overlay.v66TitleSplash.v65TitleArt { overflow: hidden; overscroll-behavior: none; touch-action: manipulation }` — no scrolling on the splash, period.
+- `.actions`: bottom-anchored — `bottom: max(48px, env(safe-area-inset-bottom, 24px))` (mobile: `max(36px, env(safe-area-inset-bottom, 20px))`). No more `top: 74%`.
+- `#startBtn`: `min-height: 60px` desktop / `58px` mobile, `touch-action: manipulation`, larger hit target.
+- Also explicitly hides `#characterGrid`, `.cards`, `.footerInfo` on splash (was already hidden by v66 but belt-and-braces).
 
-  This counteracts v66's `body.v66SplashActive #audioToggle, #musicToggle, #hudMenuBtn { display:none }` rule. `#hudMenuBtn` (settings cog) is intentionally left hidden on splash to keep the title clean. SFX and BGM remain reachable.
-- Updated `README_UPLOAD_THIS.txt` to mention the fix.
+### Select
 
-## Files changed (vs ChatGPT's v266)
+- `#overlay.v66TitleSelect.v65TitleArt` background overridden with a dark gradient — title-art image no longer bleeds through behind/below the cards when scrolled.
+- `#nmTitleMediaLayer` hidden on select — the v246 title video also no longer plays under the cards.
+
+### SFX/BGM (unchanged from earlier v266 fix)
+
+- `body.v66SplashActive #audioToggle, #musicToggle { display: inline-flex }` — counteracts v66's hide rule, so SFX/BGM stay reachable on splash. `#hudMenuBtn` (settings cog) intentionally left hidden on splash for a clean title.
+
+## What was kept from ChatGPT's v266 audit base
+
+- Core `startBtn` click + Enter/Space handler rewritten in the main script body to a clean three-function state machine (`basePassengerSelectOpen265` / `openPassengerSelectCore265` / `handleCoreStartButton265`). Splash click → opens passenger select. Select click → starts the run.
+- `state._v251BeginReveal` / `state._v251ArmRevealPrompt` exposed; reveal can be invoked directly. Reveal no longer fakes `startBtn.click()`.
+- `v257` auto-reveal calls `state._v251BeginReveal('v257-auto-trigger')` directly with stale flag clearing.
+- `v260 maybeAutoStartReveal` early-exits + clears stale flags when on the title with no final-win evidence.
+- `v260 finalWinLike()` no longer counts an armed reveal prompt as "in win flow".
+- `v261 forceStartReveal` gated off the title screen.
+- The bad v265 canonical title controller, `Passenger List`, "front door remembers", and the nine `__v265CanonicalTitleControllerInstalled` guard sites are absent.
+- v262 First Walker block preserved byte-identical to the v265 source.
+
+## Files changed (vs the previous v266 zip)
 
 - `README_UPLOAD_THIS.txt`
 - `no-moon/index.html`
 - `no-moon/game_inline.js`
 - `index_script.js`
 
-Each of the three JS-bearing files gained exactly two lines (one comment + one CSS rule) inside the existing `installV266CleanTitlePresentation` block.
-
-## Preserved content
-
-- v262 First Walker block (`installV262FirstWalkerHabitat`) is byte-identical to v265: enemy registration, buried-habitat room, astronaut remains decorations, 9 attack hazards, phase transitions, corpse drawing, persistence.
-- v261 endgame: Sun draft gate, Drowned Sky expansion, Moon Skiff homing minions, constellation HUD.
-- Drowned Sun, Nadir unlock, Vesper unlock, Moots unlock, the Field Guide deck.
-- Service-worker disabled / cleanup stub only.
+In each of the three JS-bearing files: the v266 CSS block inside `installV266CleanTitlePresentation` was rewritten (about a dozen lines), and the build-tag/cache-key strings (`V265_VERSION` / `V266_VERSION` / `V265_CACHE` / `V266_CACHE`) were bumped to `qual.v266b-mobile-splash-fix.2026-05-22.v266b` and `no-moon-v266b-mobile-splash-fix-v266b`.
 
 ## Validation
 
 Done in this session:
 
-- `node --check no-moon/index.html` (extracted inline) — parses.
-- `node --check no-moon/game_inline.js` — parses.
-- `node --check index_script.js` — parses.
-- `node --check no-moon/no-moon-sw.js` — parses.
-- `node --check no-moon-sw.js` — parses.
-- Inline script inside `no-moon/index.html` matches `no-moon/game_inline.js` exactly.
+- `node --check` passes for `no-moon/game_inline.js`, `index_script.js`, `no-moon/no-moon-sw.js`, `no-moon-sw.js`.
+- Inline script inside `no-moon/index.html` matches `no-moon/game_inline.js` (modulo trailing newline from the `<script>` wrapper, which is the same shape as ChatGPT's original v266).
 - `no-moon/game_inline.js` matches `index_script.js` exactly.
 - `unzip -t` on the deploy zip — no errors.
-- Greps confirm absent: `Passenger List`, `front door remembers`, `THE FRONT DOOR REMEMBERS`, `v265-canonical-title-css`, `__v265CanonicalTitleControllerInstalled`, `noMoonStartButtonDispatch`, `installV265Canonical`.
-- Greps confirm preserved: `installV262FirstWalkerHabitat`, `v262FirstWalker`, `persistFirstWalkerDefeat`, `installV261EndgameSunDraftDrownedSkySkiffs`.
-- Greps confirm fix is in all three JS-bearing files (1 occurrence each).
-- `serviceWorker.register` absent.
+- Greps confirm presence of the new CSS: `v266b: SPLASH` and `v266b: SELECT` in all three JS-bearing files.
+- Greps confirm absence of: `100vh!important`, `top:74%`, `Passenger List`, `front door remembers`, `v265-canonical-title-css`, `__v265CanonicalTitleControllerInstalled`, `noMoonStartButtonDispatch`.
+- Greps confirm preservation: `installV262FirstWalkerHabitat`, `installV261EndgameSunDraftDrownedSkySkiffs`, `installV266CleanTitlePresentation`, `installV265ConsolidatedTitleRevealAudit`.
 
 Not done in this session:
 
-- Live browser test. Chromium in this container blocks `file://` and `localhost` with `ERR_BLOCKED_BY_ADMINISTRATOR`, same constraint ChatGPT reported. Visual confirmation of the title screen, click flow, death overlay, Sun draft, moon reveal, First Walker arena, etc. needs an external browser.
+- Live mobile browser test. Container has no Chromium / Playwright / Puppeteer installed; even ChatGPT had Chromium but it was blocked from `file://` and `localhost`. The CSS reasoning above is grounded in the v66 / v246 / v65TitleArt source rules I read in the file, plus a look at the actual mobile title art (`no-moon-title-mobile.webp`) which has "NO MOON" at the bottom and the eclipse at the top.
 
-## Known residual notes
+## What this build cannot promise without a real mobile browser
 
-- v66 still owns title strings under the hood: `applyTitleFlow66()` continues to write "Choose Passenger" / "Descend as X" to `startBtn` and prose to `overlayText`. The v266 layer hides those strings on the splash via CSS and the `pulse()` loop overwrites `startBtn.textContent` back to `START` every frame. The result is visually correct, but the v66 owner is still alive under the veneer. A future cleanup pass could physically delete those rewrite lines in `applyTitleFlow66()` and remove `installV266CleanTitlePresentation`'s `pulse()` loop.
-- `#hudMenuBtn` (settings cog) is hidden on splash by design — splash is intentionally minimal: title art + START + SFX + BGM.
+- I cannot guarantee the title art crop is what the user calls "full". `background-size: cover` fills both dimensions and crops the longer axis; for the 941×1672 mobile.webp on a typical 360×800 portrait phone, the crop is ~45px each side horizontally with the vertical extent of the image fitting the viewport. If the user wants the entire image visible with letterbox bars, that requires `background-size: contain` and a deliberate art direction change — flag this and we can flip it.
+
+## Known residual
+
+- v66's `applyTitleFlow66()` still writes title strings under the hood; the v266 layer's `pulse()` overwrites `startBtn.textContent` back to `START` every frame. Visually correct but it's a veneer over an older owner. Future v267 could physically delete those rewrite lines and remove the pulse loop.
+- `#hudMenuBtn` (settings cog) stays hidden on splash by design.
