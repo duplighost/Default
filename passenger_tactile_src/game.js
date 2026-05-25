@@ -221,8 +221,8 @@
     const p=run.player; p.x=state.room.w*.5; p.y=state.room.h*.66; p.vx=p.vy=0; p.inv=.9; p.roomHit=false; p.stillT=0; p.dashT=0; p.wasMoving=false; p.brakeT=0; p.after.length=0;
     hardClearTouchPads(); state.input.suppressUntil=performance.now()+160;
     camX=p.x-(W/viewScale)*.5; camY=p.y-(H/viewScale)*.5;
-    if(run.level === 8 && !run.observed){ run.observed=true; addNotice(behaviorNotices.care); whisper('the room starts leaving useful things'); }
-    if(run.level === 14 && !run.overdrive){ run.overdrive=true; addNotice(behaviorNotices.endless); whisper('no ceiling now'); }
+    if(run.level === 8 && !run.observed){ run.observed=true; addNotice(behaviorNotices.care); }
+    if(run.level === 14 && !run.overdrive){ run.overdrive=true; addNotice(behaviorNotices.endless); }
   }
 
   function makeRoom(level, theme){
@@ -676,7 +676,7 @@
   }
 
   function updateCare(room,p,dt){
-    for(const c of room.care){ c.phase+=dt; if(!c.used && dist(c.x,c.y,p.x,p.y)<c.r+p.r+10){ c.used=true; p.hp=Math.min(p.maxHp,p.hp+(c.kind==='pie'?2:1)); p.shield=Math.min(3,p.shield+1); p.pulse=Math.min(100,p.pulse+22); audio.hit('care'); haptic(25); addNotice(behaviorNotices.care); whisper(c.kind==='pie'?'pie on the sill':'something helped'); for(let i=0;i<34;i++) particle(room,c.x,c.y,room.theme.c,rand(-160,160),rand(-160,160),.65,2+Math.random()*4); } }
+    for(const c of room.care){ c.phase+=dt; if(!c.used && dist(c.x,c.y,p.x,p.y)<c.r+p.r+10){ c.used=true; p.hp=Math.min(p.maxHp,p.hp+(c.kind==='pie'?2:1)); p.shield=Math.min(3,p.shield+1); p.pulse=Math.min(100,p.pulse+22); audio.hit('care'); haptic(25); addNotice(behaviorNotices.care); for(let i=0;i<34;i++) particle(room,c.x,c.y,room.theme.c,rand(-160,160),rand(-160,160),.65,2+Math.random()*4); } }
   }
 
   function updatePortals(room,p,dt){
@@ -684,9 +684,9 @@
   }
 
   function updateBehavior(room,p,move,aim,dt){
-    if(p.hp<=1 && !state.run.lowhp){ state.run.lowhp=true; addNotice(behaviorNotices.lowhp); whisper('the sharp furniture moves'); }
+    if(p.hp<=1 && !state.run.lowhp){ state.run.lowhp=true; addNotice(behaviorNotices.lowhp); }
     if(!move.active && !aim.active && room.enemies.length>0) p.stillT+=dt; else p.stillT=0;
-    if(p.stillT>2.5 && !state.run.still){ state.run.still=true; addNotice(behaviorNotices.still); p.pulse=Math.min(100,p.pulse+18); whisper('quiet counted'); }
+    if(p.stillT>2.5 && !state.run.still){ state.run.still=true; addNotice(behaviorNotices.still); p.pulse=Math.min(100,p.pulse+18); }
     if(p.dashes>=10 && !state.run.dashNotice){ state.run.dashNotice=true; addNotice(behaviorNotices.dash); }
     if(p.aimT>16 && !state.run.aimNotice){ state.run.aimNotice=true; addNotice(behaviorNotices.aim); }
   }
@@ -695,8 +695,8 @@
     const room=state.room, run=state.run, p=run.player; room.cleared=true; room.clearT=.5; room.bullets.length=0;
     state.save.totalRooms=(state.save.totalRooms||0)+1;
     const line = room.level===13 && !run.truth ? behaviorNotices.room13 : clearLines[(room.level-1)%clearLines.length];
-    if(room.level===13 && !run.truth){ run.truth=true; addNotice(line); whisper('the road was watching your hands'); }
-    else { addNotice(line); whisper(line); }
+    if(room.level===13 && !run.truth){ run.truth=true; addNotice(line); }
+    else { addNotice(line); }
     if(!p.roomHit){ run.score += Math.floor(400*run.combo); if(!run.nohitNotice){ run.nohitNotice=true; addNotice(behaviorNotices.nohit); } }
     run.score += Math.floor((300+room.level*82)*run.combo); audio.hit('clear'); haptic(35); room.portals.push({x:room.w*.5,y:room.h*.20,r:55,t:0});
     for(let i=0;i<40 && room.particles.length<budget();i++){ const a=i/40*TAU, rr=rand(40,190); particle(room,room.w*.5,room.h*.20,room.theme.c,Math.cos(a)*rr*2,Math.sin(a)*rr*2,.75,2+Math.random()*4); }
