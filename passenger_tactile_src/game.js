@@ -1,0 +1,817 @@
+(() => {
+  'use strict';
+
+  const VERSION = '2.1.0-tactile';
+  const SAVE_KEY = 'passenger.noticed.back.tactile.v21';
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+
+  const ui = {
+    overlay: document.getElementById('overlay'),
+    overlayTitle: document.getElementById('overlayTitle'),
+    overlayCopy: document.getElementById('overlayCopy'),
+    overlayButtons: document.getElementById('overlayButtons'),
+    upgrade: document.getElementById('upgrade'),
+    upgradeTitle: document.getElementById('upgradeTitle'),
+    upgradeCards: document.getElementById('upgradeCards'),
+    codex: document.getElementById('codex'),
+    codexBody: document.getElementById('codexBody'),
+    closeCodex: document.getElementById('closeCodex'),
+    hud: document.getElementById('hud'),
+    zone: document.getElementById('zone'),
+    hp: document.getElementById('hp'),
+    score: document.getElementById('score'),
+    room: document.getElementById('room'),
+    combo: document.getElementById('combo'),
+    pulseFill: document.getElementById('pulseFill'),
+    whisper: document.getElementById('whisper'),
+    sound: document.getElementById('soundBtn'),
+    codexBtn: document.getElementById('codexBtn'),
+    pause: document.getElementById('pause'),
+    pauseButtons: document.getElementById('pauseButtons'),
+    shrine: document.getElementById('shrine'),
+    shrineCards: document.getElementById('shrineCards'),
+    shrineSparkCount: document.getElementById('shrineSparkCount'),
+    closeShrine: document.getElementById('closeShrine')
+  };
+
+  const sprite = new Image();
+  let spriteReady = false;
+  sprite.onload = () => { spriteReady = true; };
+  sprite.src = window.BOON_MOOTS_SRC || './boon_moots_v2.webp';
+
+  const TAU = Math.PI * 2;
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+  const lerp = (a,b,t) => a + (b-a)*t;
+  const damp = (a,b,lambda,dt) => lerp(a,b,1-Math.exp(-lambda*dt));
+  const dist = (a,b,c,d) => Math.hypot(a-c,b-d);
+  const norm = (x,y) => { const m = Math.hypot(x,y) || 1; return {x:x/m,y:y/m,m}; };
+  const angleDiff = (a,b) => Math.atan2(Math.sin(a-b), Math.cos(a-b));
+  const rand = (a,b) => a + Math.random()*(b-a);
+  function hashString(str){ let h=2166136261; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+  function mulberry32(seed){ return function(){ let t = seed += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function pick(arr, rng=Math.random){ return arr[Math.floor(rng()*arr.length)]; }
+  function html(s){ return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+  function todaySeed(){ const d = new Date(); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
+  function coarse(){ return matchMedia('(hover:none), (pointer:coarse)').matches; }
+  function reduced(){ return matchMedia('(prefers-reduced-motion: reduce)').matches; }
+
+  let W=1,H=1,DPR=1,mobile=false,portrait=true;
+  let camX=0, camY=0, shake=0, flash=0, slowMo=0, hitPause=0;
+  let enemyId = 1;
+  let transition = {active:false, timer:0, duration:1.4, text:'', callback:null};
+  let streakNames = ['','','DOUBLE BOOT','TRIPLE STAMP','','RAMPAGE RECEIPT','','','UNSTOPPABLE PASSENGER'];
+
+  function resize(){
+    mobile = coarse() || innerWidth < 760 || innerHeight < 560;
+    portrait = innerHeight >= innerWidth;
+    DPR = Math.min(mobile ? 1.35 : 2, Math.max(1, devicePixelRatio || 1));
+    W = Math.max(320, Math.floor(innerWidth));
+    H = Math.max(320, Math.floor(innerHeight));
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  addEventListener('resize', resize, {passive:true});
+  resize();
+
+  const themes = [
+    {id:'causeway', name:'Passenger Causeway', bg:'#090612', floor:'#171021', a:'#7dfdff', b:'#ff4fd8', c:'#ffd36e', bad:'#ff6b6b', icon:'◁'},
+    {id:'arcade', name:'October Arcade', bg:'#10051d', floor:'#210b35', a:'#ff4fd8', b:'#7dfdff', c:'#ff9c40', bad:'#ff6b6b', icon:'▣'},
+    {id:'market', name:'Signal Market', bg:'#071319', floor:'#0d2631', a:'#b5ff7e', b:'#7dfdff', c:'#ffd36e', bad:'#ff6b6b', icon:'◇'},
+    {id:'lake', name:'Missing-Moon Lake', bg:'#070c22', floor:'#111d3b', a:'#f6f0ff', b:'#84e9ff', c:'#ffb6f0', bad:'#ff6b6b', icon:'☾'},
+    {id:'orchard', name:'Neon Orchard', bg:'#06140e', floor:'#112919', a:'#b5ff7e', b:'#ff4fd8', c:'#ffd36e', bad:'#ff6b6b', icon:'✦'},
+    {id:'shelf', name:'Listening Shelf', bg:'#090515', floor:'#211534', a:'#bd93ff', b:'#ff7bd5', c:'#7dfdff', bad:'#ff6b6b', icon:'♪'},
+    {id:'sludge', name:'Sludge Courts', bg:'#17070e', floor:'#281019', a:'#ff6b6b', b:'#ffd36e', c:'#b5ff7e', bad:'#ff385d', icon:'!'},
+    {id:'kindness', name:'Dead City Trying', bg:'#071215', floor:'#13262b', a:'#9bffd1', b:'#ffd36e', c:'#f6f0ff', bad:'#ff6b6b', icon:'♡'},
+    {id:'observatory', name:'Backseat Observatory', bg:'#070411', floor:'#17102b', a:'#ffd36e', b:'#f6f0ff', c:'#7dfdff', bad:'#ff6b6b', icon:'★'}
+  ];
+
+  const clearLines = [
+    'The receipt wanted your ankles. No.',
+    'The moon left paperwork. You kicked the stamp.',
+    'The cabinet pays out one quarter and one bad idea.',
+    'The bench heals you like a dad holding a flashlight.',
+    'The sludge says “actually.” Boot.',
+    'The road laughs. The lane markers show teeth.',
+    'A cassette refuses shuffle. Correct.',
+    'The cat has promoted you to suspicious contractor.',
+    'A door opens when you stop staring it down.',
+    'The moon was hiding behind a worse moon.',
+    'A pie waits on the sill. Useless. Perfect.',
+    'The book does not solve you. Good.',
+    'The passenger seat is empty. It saved your place.'
+  ];
+
+  const behaviorNotices = {
+    lowhp: 'You limp. The room quietly moves one blade away.',
+    still: 'You stop moving. The room stops lying.',
+    dash: 'Left thumb learned violence with brakes.',
+    aim: 'Right thumb learned where fear points.',
+    nohit: 'Clean room. Nothing brags.',
+    care: 'Some objects help without glowing first.',
+    room13: 'The road was watching your hands, not your score.',
+    endless: 'No ceiling now.'
+  };
+
+  const enemyDefs = {
+    moth:    {hp:18, r:17, speed:120, score:45, color:'#ff4fd8'},
+    receipt: {hp:24, r:17, speed:88, score:70, color:'#ffd36e'},
+    sludge:  {hp:40, r:24, speed:62, score:92, color:'#b5ff7e'},
+    charger: {hp:30, r:20, speed:96, score:100, color:'#ff6b6b'},
+    moon:    {hp:42, r:25, speed:52, score:120, color:'#f6f0ff'},
+    mirror:  {hp:34, r:19, speed:110, score:105, color:'#bd93ff'},
+    wraith:  {hp:28, r:16, speed:135, score:110, color:'#8866cc'},
+    boss:    {hp:300, r:50, speed:74, score:900, color:'#ffffff'}
+  };
+
+  const upgradeDefs = [
+    {id:'clean', icon:'↯', name:'Nintendo Clean', sub:'Start smoother. Stop sharper.', apply(p){ p.speed += 22; p.accel += 2.0; p.stop += 2.2; p.turn += 1.2; }},
+    {id:'rate', icon:'♪', name:'Front-to-Back Fire', sub:'Hold aim. The hook speeds up.', apply(p){ p.fireDelay *= .86; p.song += 1; }},
+    {id:'bite', icon:'✶', name:'Bubblegum Bite', sub:'Shots hit harder.', apply(p){ p.damage *= 1.18; }},
+    {id:'split', icon:'≋', name:'Sidecar Sparks', sub:'Aim throws side sparks.', apply(p){ p.split += 1; }},
+    {id:'dash', icon:'👢', name:'Boon Boot Flick', sub:'Dash sooner. Leave teeth.', apply(p){ p.dashCdBase *= .84; p.dashTrail += 1; }},
+    {id:'magnet', icon:'●', name:'Ness Magnet Nerve', sub:'Good things lean closer.', apply(p){ p.pickup += 42; p.magnet += 1; }},
+    {id:'tipper', icon:'◇', name:'Marth Tipper Clause', sub:'Far shots cut cleaner.', apply(p){ p.tipper += 1; p.crit += .04; }},
+    {id:'pika', icon:'ϟ', name:'Tiny Thunder', sub:'Hits jump when bored.', apply(p){ p.chain += 1; }},
+    {id:'gigi', icon:'🐾', name:'Gigi Management', sub:'The cat makes calls.', apply(p){ p.cat += 1; }},
+    {id:'care', icon:'♡', name:'Care Literacy', sub:'Helpful things get easier to read.', apply(p){ p.care += 1; p.maxHp += 1; p.hp = Math.min(p.maxHp, p.hp+1); }},
+    {id:'pulse', icon:'☉', name:'No-Moon Pulse', sub:'Right-tap hits wider.', apply(p){ p.pulseRadius += 45; p.pulseGain += .35; }},
+    {id:'paper', icon:'▰', name:'Paper Badge Slot', sub:'One more choice.', apply(p){ p.badges += 1; p.maxHp += 1; p.hp = Math.min(p.maxHp, p.hp+1); }},
+    {id:'knife', icon:'◆', name:'Glass Valentine', sub:'Hit harder. Bleed easier.', apply(p){ p.damage *= 1.34; p.maxHp = Math.max(2, p.maxHp-1); p.hp = Math.min(p.hp,p.maxHp); }},
+    {id:'echo', icon:'↩', name:'Echo Wall', sub:'Walls remember your name.', apply(p){ p.bounce = (p.bounce||0) + 1; }},
+    {id:'halo', icon:'◎', name:'Halo Drain', sub:'Closer kills feed the quiet.', apply(p){ p.haloDrain = (p.haloDrain||0) + 1; }}
+  ];
+
+  const bestiaryInfo = {
+    moth: {icon:'🦋', name:'Moth', desc:'Moves like bad Wi-Fi. Dies like one too.'},
+    receipt: {icon:'🧾', name:'Receipt', desc:'Tracks your returns. Shoots your doubts.'},
+    sludge: {icon:'🫠', name:'Sludge', desc:'Leaves puddles that aren\'t apologies.'},
+    charger: {icon:'⚡', name:'Charger', desc:'Telegraphs violence. Still surprising.'},
+    moon: {icon:'☾', name:'Moon', desc:'Orbits your panic. Fires in arcs.'},
+    mirror: {icon:'🪞', name:'Mirror', desc:'Shoots where you\'re looking. Stop looking.'},
+    wraith: {icon:'👻', name:'Wraith', desc:'Fades in to ruin your evening.'},
+    boss: {icon:'★', name:'Boss', desc:'Named. Dangerous. Occasionally polite.'}
+  };
+
+  const shrineDefs = [
+    {id:'vitality', name:'Thicker Skin', desc:'Start with +1 HP.', icon:'♥', cost:80, max:3, apply(p){ p.maxHp+=1; p.hp+=1; }},
+    {id:'reach', name:'Longer Arms', desc:'+15% pickup range.', icon:'●', cost:60, max:5, apply(p){ p.pickup+=16; }},
+    {id:'headstart', name:'Head Start', desc:'Begin with a random upgrade.', icon:'★', cost:200, max:1},
+    {id:'quickpulse', name:'Quick Pulse', desc:'Pulse charges 12% faster.', icon:'☉', cost:100, max:3, apply(p){ p.pulseGain+=.14; }},
+    {id:'swiftboot', name:'Swift Boot', desc:'+8% move speed.', icon:'👢', cost:90, max:4, apply(p){ p.speed+=23; }}
+  ];
+
+  function defaultSave(){ return {version:VERSION, bestScore:0, bestRoom:0, runs:0, sparks:0, notices:[], codex:['thumbs'], sound:true, bestiary:{}, totalKills:0, totalRooms:0, shrine:{}}; }
+  function loadSave(){ try{ return Object.assign(defaultSave(), JSON.parse(localStorage.getItem(SAVE_KEY)||'{}')); }catch(e){ return defaultSave(); } }
+  function saveNow(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(state.save)); }catch(e){} }
+
+  const state = {
+    mode:'title', save:loadSave(), rng:Math.random, run:null, room:null,
+    keys:Object.create(null), mouse:{x:0,y:0,down:false,seen:false},
+    input:{moveTouch:{id:null,startX:0,startY:0,x:0,y:0,dx:0,dy:0,len:0,maxLen:0,startT:0,dashLatch:false}, aimTouch:{id:null,startX:0,startY:0,x:0,y:0,dx:0,dy:0,len:0,maxLen:0,startT:0}},
+    muted:false, lastWhisper:'', oldMode:'title'
+  };
+  state.muted = !state.save.sound;
+
+  function makePlayer(){ return {
+    x:750,y:650,vx:0,vy:0,r:20,aimX:1,aimY:0,face:0,
+    hp:5,maxHp:5,shield:0,inv:0,hurt:0,
+    speed:288,accel:20.5,stop:32,turn:19,lateral:9.2,
+    fireDelay:.172,fireCd:0,damage:15,pulse:24,pulseGain:1,pulseRadius:305,
+    dashCdBase:.72,dashCd:0,dashT:0,dashTrail:0,
+    pickup:104,magnet:0,split:0,tipper:0,crit:.03,chain:0,cat:0,care:0,badges:0,song:0,bounce:0,haloDrain:0,
+    shots:0,dashes:0,stillT:0,aimT:0,roomHit:false,wasMoving:false,brakeT:0,lastSpeed:0,after:[]
+  }; }
+
+  function startRun(seedText=todaySeed()){
+    const seed = hashString(String(seedText)+'|thumbprint|'+(state.save.runs||0));
+    state.rng = mulberry32(seed);
+    state.run = {seed, level:0, score:0, combo:1, comboT:0, kills:0, roomKills:0, upgrades:[], overdrive:false, observed:false, truth:false, streak:0, streakT:0};
+    state.run.player = makePlayer();
+    const shrine = state.save.shrine || {};
+    for(const sd of shrineDefs){ const count = shrine[sd.id] || 0; if(count > 0 && sd.apply) for(let i=0;i<count;i++) sd.apply(state.run.player); }
+    if(shrine.headstart){ const u = pick(upgradeDefs, state.rng); u.apply(state.run.player); state.run.upgrades.push(u.id); }
+    state.save.runs = (state.save.runs||0)+1;
+    state.mode = 'play'; hideOverlay(); hideUpgrade(); hideShrine(); nextRoom();
+    whisper('two thumbs anywhere'); audio.ensure(); updateHUD(); saveNow();
+  }
+
+  function nextRoom(){
+    const run=state.run; run.level += 1; run.roomKills = 0;
+    const theme = themes[(run.level-1) % themes.length];
+    state.room = makeRoom(run.level, theme);
+    const p=run.player; p.x=state.room.w*.5; p.y=state.room.h*.66; p.vx=p.vy=0; p.inv=.9; p.roomHit=false; p.stillT=0;
+    camX=p.x-W*.5; camY=p.y-H*.5;
+    if(run.level === 8 && !run.observed){ run.observed=true; addNotice(behaviorNotices.care); whisper('the room starts leaving useful things'); }
+    if(run.level === 14 && !run.overdrive){ run.overdrive=true; addNotice(behaviorNotices.endless); whisper('no ceiling now'); }
+  }
+
+  function makeRoom(level, theme){
+    const rng=state.rng;
+    const room = {level,theme,w:1500,h:1050,enemies:[],bullets:[],pickups:[],particles:[],floats:[],obstacles:[],decor:[],care:[],portals:[],cleared:false,clearT:0,time:0,spawnT:0};
+    const decorCount = mobile ? 16 : 28;
+    for(let i=0;i<decorCount;i++) room.decor.push({x:randR(70,room.w-70,rng),y:randR(70,room.h-70,rng),r:randR(4,18,rng),a:rng()*TAU,kind:pick(['spark','paper','cassette','leaf','stone'],rng)});
+    const obsCount = mobile ? 3 : 5;
+    for(let i=0;i<obsCount;i++){
+      const x=randR(170,room.w-230,rng), y=randR(170,room.h-260,rng);
+      if(dist(x,y,room.w*.5,room.h*.66)<260) continue;
+      room.obstacles.push(rng()<.55?{type:'rect',x:x-55,y:y-40,w:110+rng()*110,h:80+rng()*50,r:18}:{type:'circle',x,y,rad:42+rng()*38});
+    }
+    if(level>=8 || theme.id==='kindness'){
+      const n = Math.min(1 + Math.floor((state.run.player.care||0)/2), 3);
+      for(let i=0;i<n;i++) room.care.push({x:randR(160,room.w-160,rng),y:randR(130,room.h-190,rng),r:34,used:false,kind:pick(['lamp','bench','umbrella','pie'],rng),phase:rng()*TAU});
+    }
+    if(level === 1){
+      spawnEnemy(room,'moth', room.w*.5-180, room.h*.38, true);
+      spawnEnemy(room,'receipt', room.w*.5+180, room.h*.38, true);
+    } else if(level % 5 === 0){
+      spawnEnemy(room,'boss', room.w*.5, 180, true);
+    } else {
+      const pool=['moth','moth','receipt'];
+      if(level>2) pool.push('sludge');
+      if(level>3) pool.push('charger');
+      if(level>5) pool.push('moon');
+      if(level>6) pool.push('wraith');
+      if(level>8) pool.push('mirror');
+      const n = clamp(5 + Math.floor(level*1.05) + Math.floor(rng()*3), 5, mobile?21:30);
+      for(let i=0;i<n;i++) spawnEnemy(room,pick(pool,rng));
+    }
+    return room;
+  }
+
+  function randR(a,b,rng=state.rng){ return a + rng()*(b-a); }
+  function edgeSpawn(room){
+    const rng=state.rng, side=Math.floor(rng()*4);
+    if(side===0) return {x:randR(70,room.w-70,rng),y:70};
+    if(side===1) return {x:room.w-70,y:randR(70,room.h-70,rng)};
+    if(side===2) return {x:randR(70,room.w-70,rng),y:room.h-70};
+    return {x:70,y:randR(70,room.h-70,rng)};
+  }
+  function spawnEnemy(room,type,x=null,y=null,tame=false){
+    const def=enemyDefs[type], pos=x==null?edgeSpawn(room):{x,y};
+    const lv=room.level; const scale=(type==='boss'?1.6:1)*(1+lv*.075);
+    const e={id:enemyId++,type,x:pos.x,y:pos.y,vx:0,vy:0,r:def.r,hp:def.hp*scale,maxHp:def.hp*scale,speed:def.speed*(1+Math.min(lv,20)*.018),score:def.score,color:def.color,phase:state.rng()*TAU,cd:.4+state.rng()*1.6,hit:0,tele:0,stun:0,tame};
+    if(type==='boss'){ e.name = pick(['Customer Support Moon','First Walker With Shoes','The Refund Saint','Decorative Liability'], state.rng); e.r=52; e.hp += lv*26; e.maxHp=e.hp; }
+    if(!tame && type!=='boss' && state.rng()<Math.min(.04+lv*.01,.22)){ e.elite=true; e.hp*=1.55; e.maxHp=e.hp; e.r*=1.12; e.score=Math.floor(e.score*1.7); }
+    room.enemies.push(e);
+  }
+
+
+  // ---------- input: No Moon-style two thumbs anywhere ----------
+  function setPad(pad, touch){ pad.id=touch.identifier; pad.startX=touch.clientX; pad.startY=touch.clientY; pad.x=touch.clientX; pad.y=touch.clientY; pad.dx=pad.dy=0; pad.len=pad.maxLen=0; pad.startT=performance.now(); pad.dashLatch=false; }
+  function updatePad(pad, touch){
+    pad.x=touch.clientX; pad.y=touch.clientY;
+    const dx=(pad.x-pad.startX)/70, dy=(pad.y-pad.startY)/70, l=Math.hypot(dx,dy);
+    pad.len=Math.min(1,l); pad.maxLen=Math.max(pad.maxLen,pad.len);
+    if(l>1){ pad.dx=dx/l; pad.dy=dy/l; } else { pad.dx=dx; pad.dy=dy; }
+  }
+  function clearPad(pad){ pad.id=null; pad.dx=pad.dy=pad.len=0; pad.maxLen=0; }
+  function assignTouch(touch){
+    const left = touch.clientX < W*.5;
+    if(left){
+      if(state.input.moveTouch.id===null) setPad(state.input.moveTouch,touch);
+      else if(state.input.aimTouch.id===null) setPad(state.input.aimTouch,touch);
+    } else {
+      if(state.input.aimTouch.id===null) setPad(state.input.aimTouch,touch);
+      else if(state.input.moveTouch.id===null) setPad(state.input.moveTouch,touch);
+    }
+  }
+  canvas.addEventListener('touchstart', e => {
+    if(state.mode !== 'play') return;
+    e.preventDefault(); audio.ensure();
+    for(const t of e.changedTouches) assignTouch(t);
+  }, {passive:false});
+  canvas.addEventListener('touchmove', e => {
+    if(state.mode !== 'play') return;
+    e.preventDefault();
+    for(const t of e.changedTouches){
+      if(t.identifier===state.input.moveTouch.id) updatePad(state.input.moveTouch,t);
+      if(t.identifier===state.input.aimTouch.id) updatePad(state.input.aimTouch,t);
+    }
+  }, {passive:false});
+  function releaseTouches(list){
+    for(const t of list){
+      if(t.identifier===state.input.aimTouch.id){
+        const pad=state.input.aimTouch;
+        const tap = performance.now()-pad.startT < 260 && pad.maxLen < .22;
+        if(tap) tryPulse();
+        clearPad(pad);
+      }
+      if(t.identifier===state.input.moveTouch.id){
+        const pad=state.input.moveTouch, quick=performance.now()-pad.startT<240, flick=pad.maxLen>.70;
+        if(quick && flick && state.run?.player?.dashCd<=0) tryDash(pad.dx,pad.dy);
+        clearPad(pad);
+      }
+    }
+  }
+  canvas.addEventListener('touchend', e => { if(state.mode!=='play') return; e.preventDefault(); releaseTouches(e.changedTouches); }, {passive:false});
+  canvas.addEventListener('touchcancel', e => { if(state.mode!=='play') return; e.preventDefault(); releaseTouches(e.changedTouches); }, {passive:false});
+
+  addEventListener('keydown', e => {
+    const k=e.key.toLowerCase(); state.keys[k]=true;
+    if(['arrowup','arrowdown','arrowleft','arrowright',' ','tab'].includes(k)) e.preventDefault();
+    if(k==='enter' && state.mode==='title') startRun(todaySeed());
+    if(k==='escape' || k==='p') togglePause();
+    if(k==='shift') tryDash();
+    if(k==='e' || k==='x') tryPulse();
+    if(k==='tab') toggleCodex();
+    if(k==='u') toggleSound();
+  }, {passive:false});
+  addEventListener('keyup', e => { state.keys[e.key.toLowerCase()]=false; }, {passive:true});
+  canvas.addEventListener('pointermove', e => { if(coarse()) return; state.mouse.x=e.clientX; state.mouse.y=e.clientY; state.mouse.seen=true; }, {passive:true});
+  canvas.addEventListener('pointerdown', e => { if(state.mode==='title'){ startRun(todaySeed()); return; } if(state.mode!=='play') return; audio.ensure(); if(!coarse()){ state.mouse.down=true; state.mouse.x=e.clientX; state.mouse.y=e.clientY; state.mouse.seen=true; if(e.button===2) tryPulse(); } }, {passive:false});
+  addEventListener('pointerup', e => { if(e.button===0) state.mouse.down=false; }, {passive:true});
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+  function getMoveInput(){
+    let x=0,y=0; const k=state.keys;
+    if(k.w||k.arrowup) y-=1; if(k.s||k.arrowdown) y+=1; if(k.a||k.arrowleft) x-=1; if(k.d||k.arrowright) x+=1;
+    x += state.input.moveTouch.dx || 0; y += state.input.moveTouch.dy || 0;
+    const gp = navigator.getGamepads ? navigator.getGamepads()[0] : null;
+    if(gp){ const gx=Math.abs(gp.axes[0])>.16?gp.axes[0]:0, gy=Math.abs(gp.axes[1])>.16?gp.axes[1]:0; x+=gx; y+=gy; if(gp.buttons[1]?.pressed) tryDash(); if(gp.buttons[3]?.pressed) tryPulse(); }
+    const l=Math.hypot(x,y); if(l>1){ x/=l; y/=l; }
+    return {x,y,active:l>.06,l:Math.min(1,l)};
+  }
+  function getAimInput(){
+    const p=state.run?.player; if(!p) return {x:1,y:0,active:false,aiming:false};
+    function nearest(){
+      let best=null, bd=Infinity;
+      if(state.room) for(const e of state.room.enemies){ const d=dist(p.x,p.y,e.x,e.y); if(e.hp>0 && d<bd && d<620){ best=e; bd=d; } }
+      if(best){ const n=norm(best.x-p.x,best.y-p.y); return {x:n.x,y:n.y,hit:true}; }
+      return {x:p.aimX,y:p.aimY,hit:false};
+    }
+    let ax=p.aimX, ay=p.aimY, firing=false, aiming=false;
+    const pad=state.input.aimTouch, tl=Math.hypot(pad.dx,pad.dy);
+    if(pad.id!==null){
+      const age=performance.now()-pad.startT;
+      if(tl>.18){ ax=pad.dx/(tl||1); ay=pad.dy/(tl||1); firing=true; aiming=true; }
+      else if(age>115){ const n=nearest(); ax=n.x; ay=n.y; firing=true; aiming=n.hit; }
+    }
+    else if(state.mouse.seen){
+      const wx=camX+state.mouse.x, wy=camY+state.mouse.y; const n=norm(wx-p.x,wy-p.y); if(n.m>8){ ax=n.x; ay=n.y; aiming=true; } firing=!!state.mouse.down;
+    }
+    if(state.keys[' '] || state.keys.z){ firing=true; if(!aiming){ const n=nearest(); ax=n.x; ay=n.y; aiming=n.hit; } }
+    return {x:ax,y:ay,active:firing,aiming};
+  }
+
+  // ---------- audio ----------
+  const audio = (() => {
+    let ac=null, master=null, step=0, timer=0;
+    function ensure(){ if(state.muted) return; if(!ac){ ac=new (window.AudioContext||window.webkitAudioContext)(); master=ac.createGain(); master.gain.value=.05; master.connect(ac.destination); timer=setInterval(tick,110); } if(ac.state==='suspended') ac.resume(); }
+    function note(freq,dur=.06,type='sine',gain=.06,delay=0){ if(!ac||state.muted) return; const t=ac.currentTime+delay; const o=ac.createOscillator(), g=ac.createGain(); o.type=type; o.frequency.setValueAtTime(freq,t); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(gain,t+.012); g.gain.exponentialRampToValueAtTime(.0001,t+dur); o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+.05); }
+    function noise(dur=.04,gain=.05){ if(!ac||state.muted) return; const len=Math.max(1,Math.floor(ac.sampleRate*dur)); const buf=ac.createBuffer(1,len,ac.sampleRate); const d=buf.getChannelData(0); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,1.6); const s=ac.createBufferSource(), g=ac.createGain(); s.buffer=buf; g.gain.value=gain; s.connect(g); g.connect(master); s.start(); }
+    function tick(){ if(!ac||state.muted||state.mode!=='play'||!state.room) return; const th=state.room.theme; const root=th.id==='sludge'?110:th.id==='lake'?174.61:th.id==='arcade'?196:146.83; const scale=[0,3,5,7,10,12]; if(step%2===0) note(root*Math.pow(2,scale[(step/2)%scale.length]/12),.05,step%8?'sine':'triangle',.025); if(step%8===0) note(root/2,.16,'triangle',.022); step++; }
+    function hit(kind){ ensure(); if(kind==='shot') note(520,.035,'triangle',.025); if(kind==='dash'){ noise(.035,.055); note(250,.04,'triangle',.05); } if(kind==='kill'){ note(600,.045,'sine',.05); note(900,.06,'sine',.035,.03); } if(kind==='hurt'){ noise(.09,.08); note(95,.13,'sawtooth',.045); } if(kind==='pulse'){ noise(.12,.08); note(110,.2,'triangle',.07); note(880,.18,'sine',.04,.05); } if(kind==='clear'){ note(392,.07,'sine',.055); note(588,.08,'sine',.045,.06); note(784,.1,'sine',.035,.12); } if(kind==='care'){ note(330,.12,'sine',.05); note(495,.16,'sine',.04,.08); } }
+    function mute(m){ state.muted=m; if(master) master.gain.value=m?0:.05; }
+    return {ensure,hit,mute};
+  })();
+  function haptic(ms=18){ try{ if(navigator.vibrate && coarse()) navigator.vibrate(ms); }catch(e){} }
+  function tactilePause(ms){ if(!reduced()) hitPause = Math.max(hitPause, ms / 1000); }
+
+  // ---------- gameplay ----------
+  function update(dtRaw){
+    const raw = Math.min(.05, dtRaw);
+    slowMo=Math.max(0,slowMo-raw); hitPause=Math.max(0,hitPause-raw); shake=Math.max(0,shake-raw*2.25); flash=Math.max(0,flash-raw*1.7);
+    if(transition.active){ transition.timer+=raw; if(transition.timer>=transition.duration){ transition.active=false; if(transition.callback) transition.callback(); } return; }
+    if(!state.run || !state.room || state.mode==='title') return;
+    if(state.mode==='pause' || state.mode==='upgrade' || state.mode==='codex' || state.mode==='dead' || state.mode==='shrine'){ updateParticles(state.room,raw); return; }
+    if(hitPause>0){ updateParticles(state.room, raw*.55); updateHUD(); return; }
+    const dt = Math.min(.033, raw) * (slowMo>0 ? .55 : 1);
+    const room=state.room, p=state.run.player; room.time += raw;
+    const move=getMoveInput(), aim=getAimInput();
+    p.aimX=aim.x; p.aimY=aim.y; p.face=Math.atan2(p.aimY,p.aimX);
+    if(aim.aiming) p.aimT += raw;
+    if(aim.active && p.fireCd<=0) firePlayer(p, p.aimX, p.aimY);
+    const mpad=state.input.moveTouch;
+    if(mpad.id!==null && mpad.len>.86 && !mpad.dashLatch && p.dashCd<=0 && move.active){ tryDash(move.x,move.y); mpad.dashLatch=true; }
+    if(mpad.len<.48) mpad.dashLatch=false;
+    updatePlayer(p,move,room,dt);
+    updateEnemies(room,p,dt);
+    updateBullets(room,p,dt);
+    updatePickups(room,p,dt);
+    updateCare(room,p,dt);
+    updateParticles(room,raw);
+    updatePortals(room,p,raw);
+    updateBehavior(room,p,move,aim,raw);
+    state.run.comboT=Math.max(0,state.run.comboT-raw); if(state.run.comboT<=0) state.run.combo=damp(state.run.combo,1,3,raw);
+    if(state.run.streakT>0){ state.run.streakT-=raw; if(state.run.streakT<=0) state.run.streak=0; }
+    if(!room.cleared && room.enemies.every(e=>e.hp<=0)) clearRoom();
+    updateHUD();
+  }
+
+  function updatePlayer(p,move,room,dt){
+    p.inv=Math.max(0,p.inv-dt); p.hurt=Math.max(0,p.hurt-dt); p.fireCd=Math.max(0,p.fireCd-dt); p.dashCd=Math.max(0,p.dashCd-dt); p.dashT=Math.max(0,p.dashT-dt); p.brakeT=Math.max(0,p.brakeT-dt); p.pulse=Math.min(100,p.pulse+dt*(4.8+p.pulseGain*1.15));
+    const beforeSpeed=Math.hypot(p.vx,p.vy);
+    const analog = clamp(move.l,0,1);
+    const desiredX=move.x*p.speed*(.58+.42*analog), desiredY=move.y*p.speed*(.58+.42*analog);
+    if(move.active){
+      const inLen=Math.hypot(move.x,move.y)||1, ix=move.x/inLen, iy=move.y/inLen;
+      const alignment=beforeSpeed>1?(p.vx*ix+p.vy*iy)/beforeSpeed:1;
+      const reverse=clamp(-alignment,0,1);
+      const turnPressure=clamp((1-alignment)*.55,0,1);
+      const response=p.accel + p.turn*turnPressure + 7.5*reverse;
+      p.vx=damp(p.vx,desiredX,response,dt); p.vy=damp(p.vy,desiredY,response,dt);
+      const px=-iy, py=ix; const lateral=p.vx*px+p.vy*py;
+      const lf=1-Math.exp(-p.lateral*(.42+turnPressure*.7)*dt); p.vx-=px*lateral*lf; p.vy-=py*lateral*lf;
+      if(!p.wasMoving && beforeSpeed<35 && room.particles.length<budget()){
+        for(let i=0;i<5;i++) particle(room,p.x,p.y,room.theme.a,rand(-70,70),rand(-70,70),.18,2+Math.random()*2);
+      }
+    } else {
+      if(p.wasMoving && beforeSpeed>118 && p.brakeT<=0 && !reduced()){
+        p.brakeT=.12;
+        const back=norm(-p.vx,-p.vy);
+        for(let i=0;i<8 && room.particles.length<budget();i++) particle(room,p.x-back.x*8,p.y-back.y*8,room.theme.c,back.x*rand(80,190)+rand(-40,40),back.y*rand(80,190)+rand(-40,40),.20,2+Math.random()*2.5);
+      }
+      const brake=p.stop + Math.min(13,beforeSpeed/65);
+      p.vx=damp(p.vx,0,brake,dt); p.vy=damp(p.vy,0,brake,dt); if(Math.hypot(p.vx,p.vy)<7){p.vx=0;p.vy=0;}
+    }
+    const maxV=p.speed*(p.dashT>0?2.92:1.055); let sp=Math.hypot(p.vx,p.vy); if(sp>maxV){ p.vx=p.vx/sp*maxV; p.vy=p.vy/sp*maxV; sp=maxV; }
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.x=clamp(p.x,38,room.w-38); p.y=clamp(p.y,38,room.h-38); for(const o of room.obstacles) resolveCircleObstacle(p,o);
+    if(sp>44 && !reduced() && room.particles.length<budget()) room.particles.push({kind:'trail',x:p.x-p.vx*.03,y:p.y-p.vy*.03,vx:-p.vx*.055,vy:-p.vy*.055,r:9+sp*.026,life:p.dashT>0?.13:.16,max:p.dashT>0?.13:.16,color:p.dashT>0?room.theme.c:room.theme.a});
+    p.after.unshift({x:p.x,y:p.y,face:p.face,life:p.dashT>0?.13:.16}); if(p.after.length>(mobile?6:9)) p.after.pop(); for(let i=p.after.length-1;i>=0;i--){p.after[i].life-=dt; if(p.after[i].life<=0) p.after.splice(i,1);}
+    p.wasMoving=move.active; p.lastSpeed=sp;
+  }
+
+  function tryDash(dx=null,dy=null){
+    if(state.mode!=='play'||!state.run) return; const p=state.run.player; if(p.dashCd>0) return;
+    if(dx==null){ const m=getMoveInput(); if(m.active){dx=m.x;dy=m.y;} else {dx=p.aimX;dy=p.aimY;} }
+    const n=norm(dx,dy); p.vx=n.x*830; p.vy=n.y*830; p.dashT=.165; p.inv=Math.max(p.inv,.30); p.dashCd=p.dashCdBase; p.dashes++;
+    audio.hit('dash'); haptic(20); tactilePause(14); shake=Math.max(shake,.13);
+    const room=state.room; for(let i=0;i<18;i++) particle(room,p.x-n.x*10,p.y-n.y*10,room.theme.c,rand(-n.x*280-80,-n.x*120+80),rand(-n.y*280-80,-n.y*120+80),.28,2+Math.random()*3);
+    if(p.dashTrail){
+      for(const e of room.enemies){ const d=dist(p.x,p.y,e.x,e.y); if(d<105+e.r+p.dashTrail*10){ const k=norm(e.x-p.x,e.y-p.y); damageEnemy(e,p.damage*(.65+.15*p.dashTrail),k.x*360,k.y*360,'dash'); } }
+    }
+  }
+
+  function firePlayer(p,ax,ay){
+    const room=state.room; p.fireCd=p.fireDelay; p.shots++; audio.hit('shot'); if(room.particles.length<budget()) for(let i=0;i<3;i++) particle(room,p.x+ax*26,p.y+ay*26,room.theme.a,ax*rand(90,180)+rand(-25,25),ay*rand(90,180)+rand(-25,25),.16,1.8+Math.random()*1.5);
+    const damage=p.damage*(Math.random()<p.crit+p.tipper*.025?1.8:1);
+    spawnBullet(room,'player',p.x+ax*24,p.y+ay*24,ax*620,ay*620,5.2,damage,1.4,room.theme.a);
+    if(p.split){ for(let s=-1;s<=1;s+=2){ const a=Math.atan2(ay,ax)+s*(.18+.04*Math.min(p.split,4)); spawnBullet(room,'player',p.x+ax*21,p.y+ay*21,Math.cos(a)*560,Math.sin(a)*560,4.3,damage*(.42+.05*p.split),1.15,room.theme.b); } }
+    if(p.chain && p.shots%(5-Math.min(3,p.chain))===0) chainFrom(p.x,p.y,p.damage*.58);
+  }
+
+  function chainFrom(x,y,damage){
+    const room=state.room; let best=null,bd=Infinity; for(const e of room.enemies){ const d=dist(x,y,e.x,e.y); if(d<bd && d<390){best=e; bd=d;} }
+    if(best){ damageEnemy(best,damage,rand(-80,80),rand(-80,80),'chain'); room.floats.push({x:best.x,y:best.y-26,text:'ϟ',life:.5,color:room.theme.c}); for(let i=0;i<8;i++) particle(room,x,y,room.theme.c,(best.x-x)*rand(1,3),(best.y-y)*rand(1,3),.25,2); }
+  }
+
+  function tryPulse(){
+    if(state.mode!=='play'||!state.run) return; const p=state.run.player;
+    if(p.pulse<100){ haptic(8); whisper('pulse hungry'); return; }
+    const room=state.room; p.pulse=0; flash=.75; slowMo=.42; shake=.42; tactilePause(38); audio.hit('pulse'); haptic(42);
+    for(const b of room.bullets) if(b.owner==='enemy') b.life=Math.min(b.life,.08);
+    for(const e of room.enemies.slice()){ const d=dist(p.x,p.y,e.x,e.y); if(d<p.pulseRadius+e.r){ const k=norm(e.x-p.x,e.y-p.y); damageEnemy(e,p.damage*(2.2+p.pulseGain*.5),k.x*420,k.y*420,'pulse'); } }
+    for(let i=0;i<70 && room.particles.length<budget();i++){ const a=Math.random()*TAU, r=Math.random()*p.pulseRadius; particle(room,p.x,p.y,room.theme.c,Math.cos(a)*r*3,Math.sin(a)*r*3,.65,2+Math.random()*4); }
+  }
+
+  function resolveCircleObstacle(ent,o){
+    if(o.type==='circle'){ const n=norm(ent.x-o.x,ent.y-o.y), min=ent.r+o.rad; if(n.m<min){ const push=min-n.m; ent.x+=n.x*push; ent.y+=n.y*push; ent.vx+=n.x*push*5; ent.vy+=n.y*push*5; } return; }
+    const nx=clamp(ent.x,o.x,o.x+o.w), ny=clamp(ent.y,o.y,o.y+o.h); const n=norm(ent.x-nx,ent.y-ny); if(n.m<ent.r){ const push=ent.r-n.m; ent.x+=n.x*push; ent.y+=n.y*push; ent.vx+=n.x*push*5; ent.vy+=n.y*push*5; }
+  }
+
+  function updateEnemies(room,p,dt){
+    const danger=Math.min(8,Math.floor(room.level/2));
+    for(let i=room.enemies.length-1;i>=0;i--){
+      const e=room.enemies[i]; if(e.hp<=0){ room.enemies.splice(i,1); continue; }
+      e.phase+=dt; e.cd-=dt; e.hit=Math.max(0,e.hit-dt); e.stun=Math.max(0,e.stun-dt); e.tele=Math.max(0,e.tele-dt);
+      const to=norm(p.x-e.x,p.y-e.y); let ax=0,ay=0;
+      if(e.stun<=0){
+        if(e.type==='moth'){ ax=to.x*e.speed+Math.cos(e.phase*3.1)*34; ay=to.y*e.speed+Math.sin(e.phase*2.7)*34; }
+        else if(e.type==='receipt'){ const want=to.m<250?-1:to.m>430?1:0; ax=to.x*e.speed*want+Math.cos(e.phase*1.8)*60; ay=to.y*e.speed*want+Math.sin(e.phase*2.2)*60; if(e.cd<=0&&to.m<760){ e.cd=1.1+state.rng()*.55; shootEnemy(room,e,to.x,to.y,250+room.level*7,7,2.6); } }
+        else if(e.type==='sludge'){ ax=to.x*e.speed+Math.sin(e.phase*.9)*40; ay=to.y*e.speed+Math.cos(e.phase*.7)*40; if(e.cd<=0&&to.m<560){ e.cd=1.8+state.rng()*.8; spawnBullet(room,'enemy',e.x,e.y,0,0,34,1,2.2,e.color,true); } }
+        else if(e.type==='charger'){
+          if(e.tele>0){ ax=ay=0; }
+          else if(e.cd<=0&&to.m<680){ e.tele=.48; e.cd=2.0+state.rng()*1.0; e.chargeX=to.x; e.chargeY=to.y; room.floats.push({x:e.x,y:e.y-e.r-12,text:'!',life:.42,color:room.theme.bad}); }
+          else if(e.chargeX && e.tele<=.02){ e.vx+=e.chargeX*820; e.vy+=e.chargeY*820; e.chargeX=e.chargeY=0; }
+          ax+=to.x*e.speed*.45; ay+=to.y*e.speed*.45;
+        } else if(e.type==='moon'){
+          const orbit=Math.atan2(e.y-p.y,e.x-p.x)+Math.PI/2; const want=to.m<330?-1:to.m>520?1:.05; ax=to.x*e.speed*want+Math.cos(orbit)*95; ay=to.y*e.speed*want+Math.sin(orbit)*95;
+          if(e.cd<=0&&to.m<860){ e.cd=Math.max(.82,1.55-room.level*.035); const count=room.level>12?6:4; for(let k=0;k<count;k++){ const a=Math.atan2(to.y,to.x)+(k-(count-1)/2)*.22; shootEnemy(room,e,Math.cos(a),Math.sin(a),220+room.level*6,6.4,3.0); } }
+        } else if(e.type==='mirror'){
+          const orbit=Math.atan2(e.y-p.y,e.x-p.x)-Math.PI/2; ax=to.x*e.speed*.85+Math.cos(orbit)*70; ay=to.y*e.speed*.85+Math.sin(orbit)*70;
+          if(e.cd<=0&&to.m<620){ e.cd=1.25+state.rng()*.4; const a=Math.atan2(p.aimY,p.aimX)+Math.PI; shootEnemy(room,e,Math.cos(a),Math.sin(a),320,5.8,2.4,'#bd93ff'); }
+        } else if(e.type==='wraith'){
+          const vis = Math.sin(e.phase*1.6);
+          e.wrVis = vis > 0.3 ? 1 : clamp(vis+0.3, 0.08, 0.3);
+          if(vis > 0.3){ ax=to.x*e.speed*.35+Math.cos(e.phase*2.4)*55; ay=to.y*e.speed*.35+Math.sin(e.phase*2.1)*55;
+            if(e.cd<=0 && to.m<180){ e.cd=1.6+state.rng()*.6; e.vx+=to.x*620; e.vy+=to.y*620; }
+          } else { ax=to.x*e.speed*1.3; ay=to.y*e.speed*1.3;
+            if(!reduced() && room.particles.length<budget() && Math.random()<.35) particle(room,e.x,e.y,e.color+'88',rand(-30,30),rand(-30,30),.18,2);
+          }
+        } else if(e.type==='boss'){
+          ax=to.x*e.speed+Math.cos(e.phase*.9)*62; ay=to.y*e.speed+Math.sin(e.phase*.75)*62;
+          if(e.cd<=0){ e.cd=Math.max(.72,1.85-room.level*.04); const count=8+(danger>4?4:0); for(let k=0;k<count;k++){ const a=k*TAU/count+e.phase*.45; shootEnemy(room,e,Math.cos(a),Math.sin(a),190+room.level*6,6.5,3.4,e.color); } if(room.level>5 && room.enemies.length<(mobile?24:34)) spawnEnemy(room,pick(['moth','receipt','sludge'],state.rng)); }
+        }
+        e.vx=damp(e.vx,ax,2.8,dt); e.vy=damp(e.vy,ay,2.8,dt);
+      }
+      e.x+=e.vx*dt; e.y+=e.vy*dt; e.vx*=Math.pow(.86,dt*60); e.vy*=Math.pow(.86,dt*60); e.x=clamp(e.x,34,room.w-34); e.y=clamp(e.y,34,room.h-34); for(const o of room.obstacles) resolveCircleObstacle(e,o);
+      if(p.inv<=0 && !(e.type==='wraith'&&(e.wrVis||1)<0.5) && dist(e.x,e.y,p.x,p.y)<e.r+p.r){ hurtPlayer(p,e.type==='boss'?2:1,e.x,e.y); }
+    }
+  }
+
+  function spawnBullet(room,owner,x,y,vx,vy,r,damage,life,color,puddle=false){
+    const cap=owner==='enemy'?(mobile?110:170):(mobile?90:160); let count=0; for(const b of room.bullets) if(b.owner===owner) count++; if(count>cap) return;
+    const bounces = owner==='player' ? (state.run?.player?.bounce||0) : 0;
+    room.bullets.push({owner,x,y,vx,vy,r,damage,life,max:life,color,puddle,bounces});
+  }
+  function shootEnemy(room,e,dx,dy,spd,r,life,color=e.color){ spawnBullet(room,'enemy',e.x+dx*e.r,e.y+dy*e.r,dx*spd,dy*spd,r,1,life,color,false); }
+
+  function updateBullets(room,p,dt){
+    for(let i=room.bullets.length-1;i>=0;i--){
+      const b=room.bullets[i]; b.life-=dt;
+      if(b.owner==='player' && !b.puddle){
+        let best=null,bd=Infinity, sp=Math.hypot(b.vx,b.vy)||1;
+        for(const e of room.enemies){
+          if(e.hp<=0) continue; const d=dist(b.x,b.y,e.x,e.y);
+          if(d<bd && d<420){ const dot=((e.x-b.x)*b.vx+(e.y-b.y)*b.vy)/(Math.max(1,d)*sp); if(dot>.18){ best=e; bd=d; } }
+        }
+        if(best){ const n=norm(best.x-b.x,best.y-b.y); b.vx=damp(b.vx,n.x*sp,8.5,dt); b.vy=damp(b.vy,n.y*sp,8.5,dt); }
+      }
+      if(!b.puddle){ b.x+=b.vx*dt; b.y+=b.vy*dt; }
+      if(b.owner==='enemy' && p.magnet && b.r<=7 && dist(b.x,b.y,p.x,p.y)<70+p.magnet*18){ b.life=0; p.pulse=Math.min(100,p.pulse+2.6); particle(room,b.x,b.y,room.theme.a,rand(-60,60),rand(-60,60),.25,3); }
+      if(b.owner==='player' && (b.bounces||0)>0 && !b.puddle){
+        if(b.x<0||b.x>room.w){ b.vx*=-1; b.x=clamp(b.x,1,room.w-1); b.bounces--; }
+        if(b.y<0||b.y>room.h){ b.vy*=-1; b.y=clamp(b.y,1,room.h-1); b.bounces--; }
+      }
+      if(b.life<=0 || b.x<-80 || b.y<-80 || b.x>room.w+80 || b.y>room.h+80){ room.bullets.splice(i,1); continue; }
+      if(b.owner==='player'){
+        for(const e of room.enemies){ if(e.hp>0 && dist(b.x,b.y,e.x,e.y)<b.r+e.r){ const k=norm(e.x-b.x,e.y-b.y); damageEnemy(e,b.damage,k.x*120,k.y*120,'shot'); b.life=0; break; } }
+      } else if(p.inv<=0 && dist(b.x,b.y,p.x,p.y)<b.r+p.r){ room.bullets.splice(i,1); hurtPlayer(p,b.damage,b.x,b.y); continue; }
+      if(b.life<=0){ room.bullets.splice(i,1); continue; }
+    }
+  }
+
+  function damageEnemy(e,dmg,kx=0,ky=0,kind='hit'){
+    if(e.hp<=0) return; e.hp-=dmg; e.vx+=kx; e.vy+=ky; e.hit=.11; e.stun=Math.max(e.stun,.032);
+    const room=state.room; const pause = kind==='pulse'?30:kind==='dash'?18:kind==='chain'?16:10; tactilePause(pause); shake=Math.max(shake, kind==='pulse'?.16:kind==='dash'?.09:.035);
+    if(room.floats.length<28) room.floats.push({x:e.x+rand(-6,6),y:e.y-e.r-8,text:Math.ceil(dmg),life:.30,color:kind==='pulse'?room.theme.c:room.theme.a});
+    for(let i=0;i<4 && room.particles.length<budget();i++) particle(room,e.x,e.y,kind==='pulse'?room.theme.c:e.color,rand(-90,90)+kx*.08,rand(-90,90)+ky*.08,.22,2+Math.random()*2.4);
+    if(e.hp<=0) killEnemy(e);
+  }
+
+  function killEnemy(e){
+    const room=state.room, run=state.run, p=run.player; e.hp=0; run.kills++; run.roomKills++; run.combo=Math.min(12,run.combo+(e.type==='boss'?.9:.14)); run.comboT=2.6; const score=Math.floor(e.score*run.combo*(run.overdrive?1.35:1)); run.score+=score; p.pulse=Math.min(100,p.pulse+(e.type==='boss'?18:5.2)*p.pulseGain);
+    if(p.haloDrain>0 && dist(e.x,e.y,p.x,p.y)<180) p.pulse=Math.min(100,p.pulse+12+p.haloDrain*6);
+    state.save.bestiary = state.save.bestiary||{}; state.save.bestiary[e.type] = (state.save.bestiary[e.type]||0)+1; state.save.totalKills = (state.save.totalKills||0)+1;
+    run.streak++; run.streakT=0.8;
+    const si = Math.min(run.streak, streakNames.length-1);
+    if(si>=2 && streakNames[si]){ room.floats.push({x:p.x+rand(-20,20),y:p.y-60,text:streakNames[si],life:.6,color:si>=5?'#ffd36e':room.theme.c}); if(si>=5){ shake=Math.max(shake,.18); flash=Math.max(flash,.22); } }
+    const n=e.type==='boss'?24:(e.elite?8:3+Math.floor(Math.random()*3)); for(let i=0;i<n;i++) room.pickups.push({type:'spark',x:e.x+rand(-12,12),y:e.y+rand(-12,12),vx:rand(-120,120),vy:rand(-120,120),r:6,life:8,value:4});
+    if((e.type==='boss'||Math.random()<.035) && p.hp<p.maxHp) room.pickups.push({type:'heart',x:e.x,y:e.y,vx:rand(-80,80),vy:rand(-80,80),r:11,life:8});
+    for(let i=0;i<(e.type==='boss'?42:13) && room.particles.length<budget();i++) particle(room,e.x,e.y,e.color,rand(-170,170),rand(-170,170),.5,2+Math.random()*4);
+    if(Math.random()<.16) room.floats.push({x:e.x,y:e.y-40,text:pick(['NOPE','BONK','REFUND','OBJECTION','BAD IDEA'],state.rng),life:.46,color:room.theme.c});
+    tactilePause(e.type==='boss'?58:24); shake=Math.max(shake,e.type==='boss'?.26:.10); audio.hit('kill');
+  }
+
+  function hurtPlayer(p,amount,sx,sy){
+    if(p.inv>0 || state.mode!=='play') return; if(p.shield>0){ p.shield--; amount=0; }
+    p.hp-=amount; p.roomHit=true; p.inv=.92; p.hurt=.34; shake=.46; flash=.32; tactilePause(72); audio.hit('hurt'); haptic(48); const k=norm(p.x-sx,p.y-sy); p.vx+=k.x*370; p.vy+=k.y*370; for(let i=0;i<20;i++) particle(state.room,p.x,p.y,state.room.theme.bad,rand(-140,140),rand(-140,140),.45,2+Math.random()*4);
+    if(p.hp<=0) die();
+  }
+
+  function updatePickups(room,p,dt){
+    for(let i=room.pickups.length-1;i>=0;i--){
+      const q=room.pickups[i]; q.life-=dt; const d=dist(q.x,q.y,p.x,p.y); if(d<p.pickup+q.r){ const k=norm(p.x-q.x,p.y-q.y); q.vx+=k.x*780*dt; q.vy+=k.y*780*dt; }
+      q.x+=q.vx*dt; q.y+=q.vy*dt; q.vx*=Math.pow(.18,dt); q.vy*=Math.pow(.18,dt);
+      if(d<p.r+q.r+6){ if(q.type==='spark'){ state.run.score+=Math.floor(18*state.run.combo); state.run.player.pulse=Math.min(100,p.pulse+2.1*p.pulseGain); state.save.sparks=(state.save.sparks||0)+(q.value||4); } else { p.hp=Math.min(p.maxHp,p.hp+1); audio.hit('care'); } room.pickups.splice(i,1); continue; }
+      if(q.life<=0) room.pickups.splice(i,1);
+    }
+  }
+
+  function updateCare(room,p,dt){
+    for(const c of room.care){ c.phase+=dt; if(!c.used && dist(c.x,c.y,p.x,p.y)<c.r+p.r+10){ c.used=true; p.hp=Math.min(p.maxHp,p.hp+(c.kind==='pie'?2:1)); p.shield=Math.min(3,p.shield+1); p.pulse=Math.min(100,p.pulse+22); audio.hit('care'); haptic(25); addNotice(behaviorNotices.care); whisper(c.kind==='pie'?'pie on the sill':'something helped'); for(let i=0;i<34;i++) particle(room,c.x,c.y,room.theme.c,rand(-160,160),rand(-160,160),.65,2+Math.random()*4); } }
+  }
+
+  function updatePortals(room,p,dt){
+    if(!room.portals.length) return; room.clearT=Math.max(0,room.clearT-dt); for(const po of room.portals){ po.t+=dt; if(room.clearT<=0 && dist(po.x,po.y,p.x,p.y)<po.r+p.r){ chooseUpgrade(); return; } }
+  }
+
+  function updateBehavior(room,p,move,aim,dt){
+    if(p.hp<=1 && !state.run.lowhp){ state.run.lowhp=true; addNotice(behaviorNotices.lowhp); whisper('the sharp furniture moves'); }
+    if(!move.active && !aim.active && room.enemies.length>0) p.stillT+=dt; else p.stillT=0;
+    if(p.stillT>2.5 && !state.run.still){ state.run.still=true; addNotice(behaviorNotices.still); p.pulse=Math.min(100,p.pulse+18); whisper('quiet counted'); }
+    if(p.dashes>=10 && !state.run.dashNotice){ state.run.dashNotice=true; addNotice(behaviorNotices.dash); }
+    if(p.aimT>16 && !state.run.aimNotice){ state.run.aimNotice=true; addNotice(behaviorNotices.aim); }
+  }
+
+  function clearRoom(){
+    const room=state.room, run=state.run, p=run.player; room.cleared=true; room.clearT=.5; room.bullets.length=0; state.save.totalRooms=(state.save.totalRooms||0)+1;
+    const line = room.level===13 && !run.truth ? behaviorNotices.room13 : clearLines[(room.level-1)%clearLines.length];
+    if(room.level===13 && !run.truth){ run.truth=true; addNotice(line); whisper('the road was watching your hands'); }
+    else { addNotice(line); whisper(line); }
+    if(!p.roomHit){ run.score += Math.floor(400*run.combo); if(!run.nohitNotice){ run.nohitNotice=true; addNotice(behaviorNotices.nohit); } }
+    run.score += Math.floor((300+room.level*82)*run.combo); audio.hit('clear'); haptic(35); room.portals.push({x:room.w*.5,y:room.h*.20,r:55,t:0});
+    for(let i=0;i<40 && room.particles.length<budget();i++){ const a=i/40*TAU, rr=rand(40,190); particle(room,room.w*.5,room.h*.20,room.theme.c,Math.cos(a)*rr*2,Math.sin(a)*rr*2,.75,2+Math.random()*4); }
+  }
+
+  function chooseUpgrade(){
+    state.mode='upgrade'; const p=state.run.player, rng=state.rng; const count=p.badges>=2?4:3; const pool=upgradeDefs.slice(); const choices=[]; while(choices.length<count && pool.length){ choices.push(pool.splice(Math.floor(rng()*pool.length),1)[0]); }
+    ui.upgradeTitle.textContent = state.run.level===13 ? 'Pick what survives.' : 'Pick what changes.';
+    ui.upgradeCards.innerHTML='';
+    for(const u of choices){ const b=document.createElement('button'); b.className='upgradeCard'; b.innerHTML=`<div class="uIcon">${html(u.icon)}</div><b>${html(u.name)}</b><p>${html(u.sub)}</p>`; b.onclick=()=>{ u.apply(p); state.run.upgrades.push(u.id); state.save.upgradePicks=state.save.upgradePicks||{}; state.save.upgradePicks[u.id]=(state.save.upgradePicks[u.id]||0)+1; hideUpgrade(); startTransition(); saveNow(); }; ui.upgradeCards.appendChild(b); }
+    ui.upgrade.classList.add('show');
+  }
+
+  function startTransition(){
+    const nextTheme = themes[state.run.level % themes.length];
+    transition = {active:true, timer:0, duration:1.4, text:nextTheme.name, level:state.run.level+1, theme:nextTheme, callback(){
+      state.mode='play'; nextRoom();
+    }};
+  }
+
+  function die(){
+    const run=state.run; state.mode='dead'; state.save.bestScore=Math.max(state.save.bestScore||0,Math.floor(run.score)); state.save.bestRoom=Math.max(state.save.bestRoom||0,run.level); saveNow();
+    showOverlay('The boots remain.', `Score ${Math.floor(run.score).toLocaleString()} · Room ${run.level}.\n${pick(['The moon repossessed your kneecaps. The appeal is pending.','You were killed by a sentence with too much confidence.','The road writes TRY AGAIN on a receipt and refuses to itemize the grief.'])}`, [['Run it back',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Shrine',()=>showShrine()],['Codex',()=>toggleCodex(true)]]);
+  }
+
+  function particle(room,x,y,color,vx,vy,life=.45,r=3){ if(!room || room.particles.length>budget()) return; room.particles.push({x,y,vx,vy,life,max:life,r,color}); }
+  function budget(){ return mobile?150:260; }
+
+  function addNotice(text){ if(!text) return; if(!state.save.notices.includes(text)) state.save.notices.push(text); state.save.notices=state.save.notices.slice(-100); saveNow(); }
+  function whisper(text){ state.lastWhisper=text; ui.whisper.textContent=text; ui.whisper.classList.add('show'); clearTimeout(whisper._t); whisper._t=setTimeout(()=>ui.whisper.classList.remove('show'),2600); }
+
+  // ---------- rendering ----------
+  function draw(){
+    ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,W,H); ctx.fillStyle='#05030a'; ctx.fillRect(0,0,W,H);
+    if(!state.room || !state.run){ drawTitleBg(); return; }
+    const room=state.room, p=state.run.player; const tx=clamp(p.x-W*.5,0,Math.max(0,room.w-W)), ty=clamp(p.y-H*.54,0,Math.max(0,room.h-H)); camX=damp(camX,tx,7,1/60); camY=damp(camY,ty,7,1/60); let sx=0,sy=0; if(shake>0&&!reduced()){ sx=(Math.random()-.5)*shake*28; sy=(Math.random()-.5)*shake*28; }
+    ctx.save(); ctx.translate(-camX+sx,-camY+sy);
+    drawRoom(room); drawCare(room); drawPickups(room); drawBullets(room); drawEnemies(room); drawPlayer(p,room); drawPortals(room); drawParticles(room); drawFloats(room);
+    ctx.restore();
+    drawTouchPads(); if(state.mode==='play') drawDangerIndicators(room,p); drawVignette(room.theme); if(flash>0){ ctx.fillStyle=`rgba(255,255,255,${Math.min(.18,flash*.16)})`; ctx.fillRect(0,0,W,H); }
+    if(transition.active) drawTransition();
+  }
+
+  function drawTitleBg(){
+    const t=performance.now()/1000; const g=ctx.createRadialGradient(W*.5,H*.36,20,W*.5,H*.5,Math.max(W,H)*.8); g.addColorStop(0,'#2a1244'); g.addColorStop(.5,'#090612'); g.addColorStop(1,'#020106'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    for(let i=0;i<100;i++){ const x=(Math.sin(i*999.1)*.5+.5)*W, y=(Math.sin(i*311.7)*.5+.5)*H; ctx.globalAlpha=.18+.22*Math.sin(t+i); ctx.fillStyle=i%3?'#7dfdff':'#ff4fd8'; ctx.beginPath(); ctx.arc(x,y,1.2+(i%5)*.38,0,TAU); ctx.fill(); } ctx.globalAlpha=1;
+  }
+
+  function drawRoom(room){
+    const th=room.theme; const g=ctx.createLinearGradient(0,0,room.w,room.h); g.addColorStop(0,th.floor); g.addColorStop(.68,th.bg); g.addColorStop(1,'#05030a'); ctx.fillStyle=g; ctx.fillRect(0,0,room.w,room.h);
+    ctx.save(); ctx.globalAlpha=.16; ctx.strokeStyle=th.a; ctx.lineWidth=1; for(let x=0;x<room.w;x+=82){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,room.h); ctx.stroke(); } for(let y=0;y<room.h;y+=82){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(room.w,y); ctx.stroke(); } ctx.restore();
+    if(room.level===1){ drawTutorialGlyph(room); }
+    for(const d of room.decor) drawDecor(d,th);
+    for(const o of room.obstacles) drawObstacle(o,th);
+    ctx.strokeStyle=room.cleared?th.c:th.a+'88'; ctx.lineWidth=7; roundRect(ctx,18,18,room.w-36,room.h-36,28); ctx.stroke();
+    ctx.font='900 28px system-ui,sans-serif'; ctx.fillStyle=th.a+'26'; ctx.fillText(th.icon,48,75);
+  }
+  function drawTutorialGlyph(room){
+    const th=room.theme; ctx.save(); ctx.globalAlpha=.55; ctx.textAlign='center'; ctx.font='900 22px system-ui,sans-serif'; ctx.fillStyle=th.c; ctx.fillText('left thumb',room.w*.32,room.h*.78); ctx.fillText('right thumb',room.w*.68,room.h*.78); ctx.font='900 46px system-ui,sans-serif'; ctx.fillText('↕',room.w*.32,room.h*.72); ctx.fillText('✦',room.w*.68,room.h*.72); ctx.font='800 14px system-ui,sans-serif'; ctx.fillText('flick: dash',room.w*.32,room.h*.82); ctx.fillText('tap: pulse',room.w*.68,room.h*.82); ctx.restore(); }
+  function drawDecor(d,th){ ctx.save(); ctx.translate(d.x,d.y); ctx.rotate(d.a+performance.now()/5000); ctx.globalAlpha=.28; if(d.kind==='cassette'){ roundRect(ctx,-18,-11,36,22,5); ctx.fillStyle=th.b; ctx.fill(); ctx.fillStyle='#05030a'; ctx.beginPath(); ctx.arc(-8,0,3.5,0,TAU); ctx.arc(8,0,3.5,0,TAU); ctx.fill(); } else if(d.kind==='paper'){ ctx.fillStyle=th.c; ctx.fillRect(-9,-12,18,24); } else if(d.kind==='leaf'){ ctx.fillStyle=th.a; ctx.beginPath(); ctx.ellipse(0,0,d.r*.75,d.r*.32,0,0,TAU); ctx.fill(); } else { ctx.fillStyle=d.kind==='stone'?th.b:th.c; starPath(0,0,d.r,d.r*.45,5); ctx.fill(); } ctx.restore(); ctx.globalAlpha=1; }
+  function drawObstacle(o,th){ ctx.save(); ctx.shadowColor=th.a+'44'; ctx.shadowBlur=14; if(o.type==='circle'){ const g=ctx.createRadialGradient(o.x-o.rad*.3,o.y-o.rad*.25,4,o.x,o.y,o.rad*1.15); g.addColorStop(0,th.a+'88'); g.addColorStop(1,'#07040c'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(o.x,o.y,o.rad,0,TAU); ctx.fill(); ctx.strokeStyle=th.b+'77'; ctx.lineWidth=2; ctx.stroke(); } else { ctx.fillStyle='#0a0710'; ctx.strokeStyle=th.b+'77'; ctx.lineWidth=2; roundRect(ctx,o.x,o.y,o.w,o.h,o.r); ctx.fill(); ctx.stroke(); ctx.fillStyle=th.a+'22'; roundRect(ctx,o.x+8,o.y+8,o.w-16,Math.max(6,o.h*.18),8); ctx.fill(); } ctx.restore(); }
+
+  function drawCare(room){
+    const th=room.theme, t=performance.now()/1000; for(const c of room.care){ ctx.save(); ctx.translate(c.x,c.y+Math.sin(t*2+c.phase)*4); ctx.globalAlpha=c.used?.28:1; ctx.shadowColor=th.c; ctx.shadowBlur=c.used?0:18; if(c.kind==='lamp'){ ctx.fillStyle=th.c; ctx.beginPath(); ctx.arc(0,-12,16,0,TAU); ctx.fill(); ctx.strokeStyle='#fff8'; ctx.beginPath(); ctx.moveTo(0,4); ctx.lineTo(0,28); ctx.stroke(); } else if(c.kind==='bench'){ ctx.fillStyle='#2a1a20'; roundRect(ctx,-34,-8,68,18,6); ctx.fill(); ctx.fillStyle=th.c; ctx.fillRect(-29,10,7,28); ctx.fillRect(22,10,7,28); } else if(c.kind==='umbrella'){ ctx.fillStyle=th.c; ctx.beginPath(); ctx.arc(0,0,34,Math.PI,TAU); ctx.lineTo(34,0); ctx.closePath(); ctx.fill(); ctx.strokeStyle='#fff8'; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,34); ctx.stroke(); } else { ctx.fillStyle='#f7d18b'; ctx.beginPath(); ctx.ellipse(0,0,34,18,0,0,TAU); ctx.fill(); ctx.fillStyle='#7b2f4a'; ctx.beginPath(); ctx.arc(-9,-2,5,0,TAU); ctx.arc(10,1,5,0,TAU); ctx.fill(); } ctx.restore(); }
+  }
+
+  function drawPickups(room){ const t=performance.now()/1000; for(const q of room.pickups){ ctx.save(); ctx.translate(q.x,q.y+Math.sin(t*5+q.x*.01)*3); if(q.type==='heart'){ ctx.fillStyle='#ff6b9b'; heartPath(0,0,12); ctx.fill(); } else { ctx.fillStyle=room.theme.c; ctx.shadowColor=room.theme.c; ctx.shadowBlur=12; starPath(0,0,8,3.5,5); ctx.fill(); } ctx.restore(); } }
+  function drawBullets(room){ for(const b of room.bullets){ ctx.save(); ctx.globalAlpha=clamp(b.life/(b.max||b.life),.22,1); ctx.shadowColor=b.color; ctx.shadowBlur=b.puddle?20:10; ctx.fillStyle=b.puddle?b.color+'44':b.color; ctx.beginPath(); ctx.arc(b.x,b.y,b.r*(b.puddle?1+.07*Math.sin(performance.now()/120):1),0,TAU); ctx.fill(); if(b.puddle){ ctx.strokeStyle=b.color+'aa'; ctx.stroke(); } ctx.restore(); } }
+
+  function drawEnemies(room){ const t=performance.now()/1000; for(const e of room.enemies){ ctx.save(); ctx.translate(e.x,e.y); const pulse=1+Math.sin(t*5+e.phase)*.035+(e.hit>0?.16:0); ctx.scale(pulse,pulse); ctx.shadowColor=e.color; ctx.shadowBlur=e.hit>0?24:10; if(e.type==='moth') drawMoth(e,room.theme); else if(e.type==='receipt') drawReceipt(e,room.theme); else if(e.type==='sludge') drawSludge(e,room.theme); else if(e.type==='charger') drawCharger(e,room.theme); else if(e.type==='moon') drawMoon(e,room.theme); else if(e.type==='mirror') drawMirror(e,room.theme); else if(e.type==='wraith') drawWraith(e,room.theme); else drawBoss(e,room.theme); if(e.elite){ ctx.strokeStyle=room.theme.c; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(0,0,e.r+7,0,TAU); ctx.stroke(); } if(e.hp<e.maxHp){ ctx.rotate(-Math.PI/2); ctx.strokeStyle='#0008'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(0,0,e.r+10,0,TAU); ctx.stroke(); ctx.strokeStyle=room.theme.c; ctx.beginPath(); ctx.arc(0,0,e.r+10,0,TAU*clamp(e.hp/e.maxHp,0,1)); ctx.stroke(); } ctx.restore(); if(e.tele>0){ ctx.strokeStyle=room.theme.bad+'aa'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(e.x,e.y); ctx.lineTo(e.x+(e.chargeX||0)*180,e.y+(e.chargeY||0)*180); ctx.stroke(); } } }
+  function drawMoth(e,th){ ctx.fillStyle=e.color; ctx.beginPath(); ctx.ellipse(-9,0,15,22,Math.sin(e.phase)*.2,0,TAU); ctx.ellipse(9,0,15,22,-Math.sin(e.phase)*.2,0,TAU); ctx.fill(); ctx.fillStyle='#090612'; ctx.beginPath(); ctx.ellipse(0,4,8,15,0,0,TAU); ctx.fill(); ctx.fillStyle=th.c; ctx.beginPath(); ctx.arc(-4,-5,2,0,TAU); ctx.arc(4,-5,2,0,TAU); ctx.fill(); }
+  function drawReceipt(e,th){ ctx.rotate(Math.sin(e.phase)*.16); ctx.fillStyle='#fff4d6'; roundRect(ctx,-15,-23,30,46,4); ctx.fill(); ctx.strokeStyle=th.c; ctx.stroke(); ctx.fillStyle='#180b10'; for(let y=-12;y<14;y+=8) ctx.fillRect(-8,y,16,2); }
+  function drawSludge(e,th){ ctx.fillStyle='#142512'; ctx.beginPath(); ctx.ellipse(0,5,e.r*1.18,e.r*.82,Math.sin(e.phase)*.16,0,TAU); ctx.fill(); ctx.fillStyle=e.color; ctx.globalAlpha=.82; ctx.beginPath(); ctx.arc(-8,-4,5,0,TAU); ctx.arc(9,-3,5,0,TAU); ctx.fill(); ctx.globalAlpha=1; ctx.strokeStyle=th.c+'aa'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(0,3,e.r*.72,0,TAU); ctx.stroke(); }
+  function drawCharger(e,th){ ctx.fillStyle=e.color; ctx.beginPath(); ctx.moveTo(-12,-22); ctx.lineTo(22,-12); ctx.lineTo(8,4); ctx.lineTo(22,22); ctx.lineTo(-18,14); ctx.lineTo(-6,0); ctx.closePath(); ctx.fill(); ctx.strokeStyle='#fff8'; ctx.stroke(); }
+  function drawMoon(e,th){ ctx.fillStyle='#f6f0ff'; ctx.beginPath(); ctx.arc(0,0,e.r,0,TAU); ctx.fill(); ctx.fillStyle=th.bg; ctx.beginPath(); ctx.arc(9,-4,e.r*.82,0,TAU); ctx.fill(); ctx.strokeStyle=th.a; ctx.lineWidth=2; ctx.stroke(); }
+  function drawMirror(e,th){ ctx.fillStyle='#05030a'; roundRect(ctx,-16,-22,32,44,8); ctx.fill(); ctx.strokeStyle=e.color; ctx.lineWidth=4; ctx.stroke(); ctx.fillStyle=th.c; ctx.fillRect(-7,-12,14,24); }
+  function drawWraith(e,th){ const vis=e.wrVis!==undefined?e.wrVis:1; ctx.globalAlpha=vis; ctx.fillStyle=e.color; ctx.beginPath(); ctx.ellipse(0,-4,e.r*.7,e.r*1.2,0,0,TAU); ctx.fill(); ctx.strokeStyle=e.color+'88'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(-6,e.r*.8); ctx.quadraticCurveTo(-10,e.r*1.6,-4,e.r*2); ctx.moveTo(6,e.r*.8); ctx.quadraticCurveTo(10,e.r*1.6,4,e.r*2); ctx.stroke(); ctx.fillStyle=vis>0.5?th.c:'#fff'; ctx.beginPath(); ctx.arc(-5,-8,2.5,0,TAU); ctx.arc(5,-8,2.5,0,TAU); ctx.fill(); ctx.globalAlpha=1; }
+  function drawBoss(e,th){ const grd=ctx.createRadialGradient(-12,-18,4,0,0,e.r*1.2); grd.addColorStop(0,th.c); grd.addColorStop(.38,th.b); grd.addColorStop(1,'#120818'); ctx.fillStyle=grd; starPath(0,0,e.r*1.1,e.r*.52,8); ctx.fill(); ctx.fillStyle='#05030a'; ctx.beginPath(); ctx.arc(-13,-9,7,0,TAU); ctx.arc(13,-9,7,0,TAU); ctx.fill(); ctx.strokeStyle=th.c; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(0,5,18,.15,Math.PI-.15); ctx.stroke(); }
+
+  function drawPlayer(p,room){ const th=room.theme; for(let i=p.after.length-1;i>=0;i--){ const a=p.after[i]; drawPlayerBody(a.x,a.y,a.face,th,clamp(a.life/.16,0,1)*.18,true); } if(p.cat) for(let c=0;c<p.cat;c++){ const a=performance.now()/540+c*TAU/p.cat; drawCat(p.x+Math.cos(a)*76,p.y+Math.sin(a)*50,.58,th); } drawPlayerBody(p.x,p.y,p.face,th,1,false); if(p.inv>0){ ctx.strokeStyle=th.c+'aa'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(p.x,p.y,31+Math.sin(performance.now()/80)*3,0,TAU); ctx.stroke(); } if(p.shield>0){ ctx.strokeStyle=th.a+'99'; ctx.lineWidth=2; for(let i=0;i<p.shield;i++){ ctx.beginPath(); ctx.arc(p.x,p.y,38+i*5,0,TAU); ctx.stroke(); } } }
+  function drawPlayerBody(x,y,face,th,alpha=1,ghost=false){ ctx.save(); ctx.globalAlpha=alpha; shadow(x,y+25,28,9,ghost?.1:.30); ctx.translate(x,y); if(spriteReady && !ghost){ ctx.drawImage(sprite,-36,-72,72,106); ctx.strokeStyle=th.a; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(Math.cos(face)*16,Math.sin(face)*16); ctx.lineTo(Math.cos(face)*40,Math.sin(face)*40); ctx.stroke(); } else { ctx.fillStyle=ghost?th.a:'#fff5f8'; ctx.strokeStyle='#05030a'; ctx.lineWidth=5; ctx.beginPath(); ctx.ellipse(0,-8,21,27,0,0,TAU); ctx.fill(); ctx.stroke(); ctx.fillStyle='#05030a'; ctx.beginPath(); ctx.arc(-8,-12,4,0,TAU); ctx.arc(8,-12,4,0,TAU); ctx.fill(); ctx.strokeStyle='#05030a'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(0,-5,8,.1,Math.PI-.1); ctx.stroke(); ctx.fillStyle=th.b; ctx.fillRect(-17,19,14,16); ctx.fillRect(4,19,14,16); } ctx.restore(); ctx.globalAlpha=1; }
+  function drawCat(x,y,s,th){ ctx.save(); ctx.translate(x,y); ctx.scale(s,s); shadow(0,14,20,6,.25); ctx.fillStyle='#11131b'; ctx.beginPath(); ctx.ellipse(0,0,26,18,0,0,TAU); ctx.fill(); ctx.fillStyle='#f9f6ee'; ctx.beginPath(); ctx.ellipse(-8,1,12,16,0,0,TAU); ctx.fill(); ctx.fillStyle='#11131b'; ctx.beginPath(); ctx.moveTo(-18,-10); ctx.lineTo(-10,-30); ctx.lineTo(-2,-9); ctx.moveTo(8,-9); ctx.lineTo(16,-30); ctx.lineTo(22,-8); ctx.fill(); ctx.fillStyle=th.c; ctx.beginPath(); ctx.arc(-7,-3,2.8,0,TAU); ctx.arc(9,-3,2.8,0,TAU); ctx.fill(); ctx.restore(); }
+
+  function drawPortals(room){ const t=performance.now()/1000; for(const po of room.portals){ const r=po.r+Math.sin(t*5)*4; const g=ctx.createRadialGradient(po.x,po.y,8,po.x,po.y,r*1.8); g.addColorStop(0,room.theme.c+'cc'); g.addColorStop(.45,room.theme.a+'66'); g.addColorStop(1,'transparent'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(po.x,po.y,r*1.8,0,TAU); ctx.fill(); ctx.strokeStyle=room.theme.c; ctx.lineWidth=4; starPath(po.x,po.y,r,r*.45,6); ctx.stroke(); } }
+  function drawParticles(room){ for(const p of room.particles){ const a=clamp(p.life/p.max,0,1); ctx.globalAlpha=a; ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=10; ctx.beginPath(); ctx.arc(p.x,p.y,p.r*a,0,TAU); ctx.fill(); } ctx.globalAlpha=1; ctx.shadowBlur=0; }
+  function drawFloats(room){ ctx.textAlign='center'; for(const f of room.floats){ ctx.globalAlpha=clamp(f.life/.5,0,1); ctx.fillStyle=f.color; if(f.big){ ctx.font='900 28px system-ui,sans-serif'; ctx.shadowColor=f.color; ctx.shadowBlur=16; } else { ctx.font='900 18px system-ui,sans-serif'; ctx.shadowBlur=0; } ctx.fillText(f.text,f.x,f.y); } ctx.globalAlpha=1; ctx.shadowBlur=0; ctx.textAlign='left'; }
+  function drawTouchPads(){ if(state.mode!=='play') return; drawPad(state.input.moveTouch,'#7dfdff','MOVE'); drawPad(state.input.aimTouch,'#ffd36e','AIM'); }
+  function drawPad(pad,color,label){ if(pad.id===null) return; ctx.save(); ctx.globalAlpha=.72; ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(pad.startX,pad.startY,70,0,TAU); ctx.stroke(); ctx.globalAlpha=.95; ctx.fillStyle=color+'44'; ctx.beginPath(); ctx.arc(pad.startX+pad.dx*70,pad.startY+pad.dy*70,28,0,TAU); ctx.fill(); ctx.fillStyle=color; ctx.font='900 11px system-ui,sans-serif'; ctx.textAlign='center'; ctx.fillText(label,pad.startX,pad.startY+92); ctx.restore(); }
+  function drawVignette(th){ const g=ctx.createRadialGradient(W*.5,H*.48,Math.min(W,H)*.22,W*.5,H*.5,Math.max(W,H)*.75); g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.38)'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); }
+
+  function drawTransition(){
+    const t=transition, p=t.timer/t.duration;
+    let alpha=0;
+    if(p<0.28) alpha=p/0.28;
+    else if(p<0.72) alpha=1;
+    else alpha=1-(p-0.72)/0.28;
+    ctx.fillStyle=`rgba(5,3,10,${clamp(alpha,0,1)})`;
+    ctx.fillRect(0,0,W,H);
+    if(p>=0.28 && p<0.72){
+      ctx.save(); ctx.globalAlpha=Math.min(1,(p-0.28)/0.08);
+      ctx.textAlign='center';
+      const fs=Math.min(52,Math.max(28,W*0.05));
+      ctx.font=`900 ${fs}px system-ui,sans-serif`; ctx.fillStyle=t.theme?t.theme.a:'#7dfdff';
+      ctx.fillText(t.text||'',W*.5,H*.46);
+      ctx.font=`800 ${fs*.45}px system-ui,sans-serif`; ctx.fillStyle=t.theme?t.theme.c:'#ffd36e';
+      ctx.fillText(`room ${t.level||''}`,W*.5,H*.46+fs*.8);
+      ctx.restore();
+    }
+  }
+
+  function drawDangerIndicators(room,p){
+    if(!room||!p) return;
+    const margin=28, sz=10; let count=0;
+    ctx.save();
+    for(const e of room.enemies){
+      if(e.hp<=0||count>=8) continue;
+      const sx=e.x-camX, sy=e.y-camY;
+      if(sx>-20&&sx<W+20&&sy>-20&&sy<H+20) continue;
+      const cx=clamp(sx,margin,W-margin), cy=clamp(sy,margin,H-margin);
+      const a=Math.atan2(sy-H*.5,sx-W*.5);
+      const charging=e.type==='charger'&&e.tele>0;
+      const color=charging?room.theme.bad:e.color;
+      ctx.globalAlpha=charging?.9:.45;
+      ctx.fillStyle=color;
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(a);
+      const s=charging?sz*1.5:sz;
+      ctx.beginPath(); ctx.moveTo(s,0); ctx.lineTo(-s*.6,-s*.6); ctx.lineTo(-s*.6,s*.6); ctx.closePath(); ctx.fill();
+      ctx.restore(); count++;
+    }
+    ctx.restore();
+  }
+
+  function updateParticles(room,dt){ for(let i=room.particles.length-1;i>=0;i--){ const p=room.particles[i]; p.life-=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=Math.pow(.16,dt); p.vy*=Math.pow(.16,dt); if(p.life<=0) room.particles.splice(i,1); } for(let i=room.floats.length-1;i>=0;i--){ const f=room.floats[i]; f.life-=dt; f.y-=34*dt; if(f.life<=0) room.floats.splice(i,1); } }
+
+  function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r); c.lineTo(x+w,y+h-r); c.quadraticCurveTo(x+w,y+h,x+w-r,y+h); c.lineTo(x+r,y+h); c.quadraticCurveTo(x,y+h,x,y+h-r); c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y); c.closePath(); }
+  function starPath(x,y,r1,r2,n){ ctx.beginPath(); for(let i=0;i<n*2;i++){ const a=-Math.PI/2+i*Math.PI/n; const r=i%2?r2:r1; ctx.lineTo(x+Math.cos(a)*r,y+Math.sin(a)*r); } ctx.closePath(); }
+  function heartPath(x,y,s){ ctx.beginPath(); ctx.moveTo(x,y+s*.42); ctx.bezierCurveTo(x-s*1.25,y-s*.24,x-s*.72,y-s*.95,x,y-s*.45); ctx.bezierCurveTo(x+s*.72,y-s*.95,x+s*1.25,y-s*.24,x,y+s*.42); }
+  function shadow(x,y,w,h,a){ ctx.save(); ctx.globalAlpha=a; ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(x,y,w,h,0,0,TAU); ctx.fill(); ctx.restore(); }
+
+  // ---------- UI ----------
+  function updateHUD(){
+    if(!state.run){ ui.zone.textContent='The Passenger Who Noticed Back'; ui.hp.textContent='♥♥♥♥♥'; ui.score.textContent='0'; ui.room.textContent='room 0'; ui.combo.textContent='two thumbs'; ui.pulseFill.style.width='0%'; return; }
+    const p=state.run.player, r=state.run; ui.zone.textContent=state.room.theme.name; ui.hp.textContent='♥'.repeat(Math.max(0,p.hp))+'♡'.repeat(Math.max(0,p.maxHp-p.hp))+(p.shield?` +${p.shield}`:''); ui.score.textContent=Math.floor(r.score).toLocaleString(); ui.room.textContent=`room ${r.level}${r.overdrive?'∞':''}`; ui.combo.textContent=`x${r.combo.toFixed(1)}`; ui.pulseFill.style.width=`${clamp(p.pulse,0,100)}%`; ui.sound.textContent=state.muted?'sound off':'sound on'; }
+  function showOverlay(title,copy,buttons){ ui.overlayTitle.textContent=title; ui.overlayCopy.textContent=copy; ui.overlayButtons.innerHTML=''; for(const [label,fn] of buttons){ const b=document.createElement('button'); b.className='bigBtn'; b.textContent=label; b.onclick=fn; ui.overlayButtons.appendChild(b); } ui.overlay.classList.add('show'); }
+  function hideOverlay(){ ui.overlay.classList.remove('show'); }
+  function hideUpgrade(){ ui.upgrade.classList.remove('show'); }
+  function showTitle(){ state.mode='title'; showOverlay('The Passenger Who Noticed Back', 'Tactile Edition\n\nMobile: put two thumbs down anywhere.\nLeft moves. Flick left to dash.\nRight aims and fires. Tap right for pulse.\n\nPC: WASD, mouse hold, Shift, E/P to pause.', [['Start daily run',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Shrine',()=>showShrine()],['Codex',()=>toggleCodex(true)]]); updateHUD(); }
+  function toggleSound(){ state.muted=!state.muted; state.save.sound=!state.muted; audio.mute(state.muted); if(!state.muted) audio.ensure(); saveNow(); updateHUD(); }
+  function toggleCodex(force=false){
+    if(force || state.mode!=='codex'){ state.oldMode=state.mode; state.mode='codex'; renderCodex(); ui.codex.classList.add('show'); }
+    else { ui.codex.classList.remove('show'); state.mode=state.oldMode||'play'; }
+  }
+  function renderCodex(){
+    const notices=(state.save.notices||[]).slice(-18).reverse();
+    const best=state.save.bestiary||{};
+    let bestiary='<h3>Bestiary</h3><div class="codexGrid">';
+    for(const [type,info] of Object.entries(bestiaryInfo)){
+      const kills=best[type]||0;
+      bestiary+=`<div class="codexCard"><b>${info.icon} ${kills?info.name:'???'}</b><p>${kills?info.desc:'Not yet encountered.'}</p><p style="color:var(--gold);font-weight:900">${kills?kills.toLocaleString()+' defeated':''}</p></div>`;
+    }
+    bestiary+='</div>';
+    let favUp='None yet';
+    const picks=state.save.upgradePicks||{};
+    let maxPick=0;
+    for(const [id,c] of Object.entries(picks)){ if(c>maxPick){ maxPick=c; const u=upgradeDefs.find(d=>d.id===id); if(u) favUp=u.icon+' '+u.name; } }
+    ui.codexBody.innerHTML=`<div class="codexGrid"><div class="codexCard"><b>Thumbs</b><p>Left moves. Right aims. Flick left. Tap right. No button farm.</p></div><div class="codexCard"><b>Rooms</b><p>Clear. Choose. Scale. Room 13 tells the truth. Then it keeps going.</p></div><div class="codexCard"><b>Care</b><p>Lamps, benches, umbrellas, and pie help before they explain.</p></div></div>${bestiary}<h3>Notices</h3><ol>${notices.length?notices.map(n=>`<li>${html(n)}</li>`).join(''):'<li>No notices yet. Go make the road nervous.</li>'}</ol><h3>Stats</h3><p>Runs: ${(state.save.runs||0).toLocaleString()} · Best score: ${Math.floor(state.save.bestScore||0).toLocaleString()} · Best room: ${state.save.bestRoom||0}<br>Sparks: ${(state.save.sparks||0).toLocaleString()} · Total kills: ${(state.save.totalKills||0).toLocaleString()} · Rooms cleared: ${(state.save.totalRooms||0).toLocaleString()}<br>Favorite upgrade: ${html(favUp)}</p>`;
+  }
+
+  function togglePause(){
+    if(state.mode==='play'){ state.mode='pause'; ui.pauseButtons.innerHTML=''; [['Resume',()=>{ui.pause.classList.remove('show');state.mode='play';}],['Sound',toggleSound],['Quit to title',()=>{ui.pause.classList.remove('show');finalSave();state.run=null;state.room=null;showTitle();}]].forEach(([label,fn])=>{ const b=document.createElement('button'); b.className='bigBtn'; b.textContent=label; b.onclick=fn; ui.pauseButtons.appendChild(b); }); ui.pause.classList.add('show'); }
+    else if(state.mode==='pause'){ ui.pause.classList.remove('show'); state.mode='play'; }
+  }
+
+  function showShrine(){
+    state.mode='shrine'; state.save.shrine=state.save.shrine||{};
+    ui.shrineSparkCount.textContent=`Sparks: ${(state.save.sparks||0).toLocaleString()}`;
+    ui.shrineCards.innerHTML='';
+    for(const sd of shrineDefs){
+      const lvl=state.save.shrine[sd.id]||0;
+      const maxed=lvl>=sd.max;
+      const cost=maxed?0:Math.floor(sd.cost*(1+lvl*0.6));
+      const canBuy=!maxed&&(state.save.sparks||0)>=cost;
+      const card=document.createElement('button');
+      card.className='shrineCard'+(maxed?' maxed':'')+(lvl>0?' owned':'');
+      card.innerHTML=`<div class="sIcon">${sd.icon}</div><b>${html(sd.name)}</b><p>${html(sd.desc)}</p><span class="cost">${maxed?'MAXED':`Lv ${lvl}→${lvl+1} · ${cost} sparks`}</span>`;
+      if(canBuy) card.onclick=()=>{ state.save.sparks-=cost; state.save.shrine[sd.id]=lvl+1; saveNow(); showShrine(); };
+      else if(!maxed) card.disabled=true;
+      ui.shrineCards.appendChild(card);
+    }
+    hideOverlay(); ui.shrine.classList.add('show');
+  }
+  function hideShrine(){ ui.shrine.classList.remove('show'); }
+
+  ui.sound.addEventListener('click', toggleSound); ui.codexBtn.addEventListener('click', () => toggleCodex(true)); ui.closeCodex.addEventListener('click', () => toggleCodex());
+  ui.closeShrine.addEventListener('click', ()=>{ hideShrine(); showTitle(); });
+
+  let last=performance.now(); function frame(t){ const dt=Math.min(.05,(t-last)/1000); last=t; update(dt); draw(); requestAnimationFrame(frame); }
+  function finalSave(){ if(state.run){ state.save.bestScore=Math.max(state.save.bestScore||0,Math.floor(state.run.score)); state.save.bestRoom=Math.max(state.save.bestRoom||0,state.run.level); } saveNow(); }
+  addEventListener('pagehide',finalSave); addEventListener('beforeunload',finalSave);
+
+  window.passengerTactileSelfTest = window.passengerThumbprintSelfTest = () => {
+    const nodes=[...document.querySelectorAll('button,.touchTarget')].map(n=>{ const r=n.getBoundingClientRect(); return {text:(n.textContent||'').trim().slice(0,40), cls:n.className, w:Math.round(r.width), h:Math.round(r.height), visible:r.width>0&&r.height>0}; });
+    const small=nodes.filter(n=>n.visible&&(n.w<44||n.h<44));
+    return {ok:small.length===0 && document.documentElement.scrollWidth<=innerWidth+1, version:VERSION, viewport:{w:innerWidth,h:innerHeight,dpr:DPR,mobile,portrait}, horizontalOverflow:document.documentElement.scrollWidth-innerWidth, smallTargets:small, state:window.passengerThumbprintDebug()};
+  };
+  window.passengerTactileDebug = window.passengerThumbprintDebug = () => ({version:VERSION,mode:state.mode,room:state.room?{level:state.room.level,enemies:state.room.enemies.length,bullets:state.room.bullets.length,particles:state.room.particles.length,cleared:state.room.cleared}:null,run:state.run?{score:Math.floor(state.run.score),level:state.run.level,hp:state.run.player.hp,pulse:Math.floor(state.run.player.pulse),upgrades:state.run.upgrades}:null,save:state.save});
+  window.passengerTactileStart = window.passengerThumbprintStart = () => startRun(todaySeed());
+  window.passengerTactileUnlockAll = window.passengerThumbprintUnlockAll = () => { state.save.notices=[...clearLines,...Object.values(behaviorNotices)]; saveNow(); renderCodex(); return state.save; };
+  window.passengerTactileReset = window.passengerThumbprintReset = () => { localStorage.removeItem(SAVE_KEY); location.reload(); };
+
+  showTitle(); requestAnimationFrame(frame);
+})();
