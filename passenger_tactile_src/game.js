@@ -1034,6 +1034,7 @@
   function showShrine(){
     state.oldMode=state.mode; state.mode='shrine';
     const sh=state.save.shrine||{}; const sparks=state.save.sparks||0;
+    document.getElementById('shrineSparks').textContent='✦ '+sparks.toLocaleString()+' sparks';
     ui.shrineCards.innerHTML='';
     for(const sd of shrineDefs){
       const owned=!!sh[sd.id]; const canBuy=!owned&&sparks>=sd.cost;
