@@ -724,7 +724,7 @@
 
   function die(){
     const run=state.run; state.mode='dead'; state.save.bestScore=Math.max(state.save.bestScore||0,Math.floor(run.score)); state.save.bestRoom=Math.max(state.save.bestRoom||0,run.level); saveNow();
-    showOverlay('The boon boots remain.', `Score ${Math.floor(run.score).toLocaleString()} · Room ${run.level}.\n${pick(['A shopping cart wrote your obituary in magenta crayon. The wheel squeaked during the eulogy.','You were killed by a sentence with too much confidence.','The road writes TRY AGAIN on a receipt and refuses to itemize the grief.'])}`, [['Run it back',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Codex',()=>toggleCodex(true)]]);
+    showOverlay('The boon boots remain.', `Score ${Math.floor(run.score).toLocaleString()} · Room ${run.level}.\n${pick(['A shopping cart wrote your obituary in magenta crayon. The wheel squeaked during the eulogy.','You were killed by a sentence with too much confidence.','The road writes TRY AGAIN on a receipt and refuses to itemize the grief.'])}`, [['Run it back',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Codex',()=>toggleCodex(true)],['Shrine',()=>showShrine()]]);
   }
 
   function particle(room,x,y,color,vx,vy,life=.45,r=3){ if(!room || room.particles.length>budget()) return; room.particles.push({x,y,vx,vy,life,max:life,r,color}); }
@@ -741,7 +741,9 @@
     ctx.save(); ctx.translate(-camX+sx,-camY+sy);
     drawRoom(room); drawCare(room); drawPickups(room); drawBullets(room); drawEnemies(room); drawPlayer(p,room); drawPortals(room); drawParticles(room); drawFloats(room);
     ctx.restore();
+    if(state.mode==='play') drawDangerIndicators(room,p);
     drawTouchPads(); drawVignette(room.theme); if(flash>0){ ctx.fillStyle=`rgba(255,255,255,${Math.min(.18,flash*.16)})`; ctx.fillRect(0,0,W,H); }
+    if(transition.active) drawTransition();
   }
 
   function drawTitleBg(){
@@ -783,6 +785,7 @@
       else if(e.type==='cart') drawCart(e,room.theme);
       else if(e.type==='moon') drawMoon(e,room.theme);
       else if(e.type==='mirror') drawMirror(e,room.theme);
+      else if(e.type==='wraith') drawWraith(e,room.theme);
       else drawBoss(e,room.theme);
       if(e.elite){ ctx.strokeStyle=room.theme.c; ctx.lineWidth=3; ctx.setLineDash([7,5]); ctx.beginPath(); ctx.arc(0,0,e.r+8,0,TAU); ctx.stroke(); ctx.setLineDash([]); }
       if(e.hp<e.maxHp){ ctx.rotate(-Math.PI/2); ctx.strokeStyle='#0009'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(0,0,e.r+12,0,TAU); ctx.stroke(); ctx.strokeStyle=room.theme.c; ctx.beginPath(); ctx.arc(0,0,e.r+12,0,TAU*clamp(e.hp/e.maxHp,0,1)); ctx.stroke(); }
@@ -866,6 +869,28 @@
     ctx.strokeStyle='#bd93ff99'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(-8,13); ctx.lineTo(-8,31); ctx.moveTo(8,13); ctx.lineTo(8,31); ctx.stroke(); ctx.fillStyle='#2c2758'; ctx.fillRect(-15,31,12,12); ctx.fillRect(4,31,12,12);
   }
 
+  function drawWraith(e,th){
+    const vis=e.wrVis||0; const alpha=0.28+vis*0.72;
+    ctx.globalAlpha=alpha;
+    shadow(0,20,18,6,.18*alpha);
+    // Ghostly ellipse body
+    const g=ctx.createRadialGradient(-3,-6,2,0,0,e.r*1.2);
+    g.addColorStop(0,'#c4a8ff'); g.addColorStop(.5,e.color); g.addColorStop(1,'#1a0c38');
+    ctx.fillStyle=g;
+    ctx.beginPath();
+    ctx.ellipse(0,-2,e.r*1.1,e.r*1.4,0,0,TAU);
+    ctx.fill();
+    // Wispy tails
+    ctx.strokeStyle='#8866cc'; ctx.lineWidth=2;
+    for(let k=-1;k<=1;k++){
+      const ox=k*8, wob=Math.sin(e.phase*3+k*2)*6;
+      ctx.beginPath(); ctx.moveTo(ox,e.r*.8); ctx.quadraticCurveTo(ox+wob,e.r*1.8+Math.abs(k)*4,ox+wob*1.5,e.r*2.4); ctx.stroke();
+    }
+    // Glowing eyes
+    ctx.globalAlpha=alpha; drawEnemyEyes(-5,-8,4,3,'#ff88ff');
+    ctx.globalAlpha=1;
+  }
+
   function drawBoss(e,th){
     const spin=e.phase*.55; shadow(0,45,66,14,.32);
     ctx.save(); ctx.rotate(spin); ctx.strokeStyle='#ffd36e'; ctx.lineWidth=6; ctx.beginPath(); ctx.arc(0,0,e.r*.84,0,TAU); ctx.stroke(); for(let k=0;k<8;k++){ const a=k*TAU/8; ctx.beginPath(); ctx.moveTo(Math.cos(a)*e.r*.48,Math.sin(a)*e.r*.48); ctx.lineTo(Math.cos(a)*e.r*.95,Math.sin(a)*e.r*.95); ctx.stroke(); } ctx.restore();
@@ -911,7 +936,25 @@
 
   function drawPortals(room){ const t=performance.now()/1000; for(const po of room.portals){ const r=po.r+Math.sin(t*5)*4; const g=ctx.createRadialGradient(po.x,po.y,8,po.x,po.y,r*1.8); g.addColorStop(0,room.theme.c+'cc'); g.addColorStop(.45,room.theme.a+'66'); g.addColorStop(1,'transparent'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(po.x,po.y,r*1.8,0,TAU); ctx.fill(); ctx.strokeStyle=room.theme.c; ctx.lineWidth=4; starPath(po.x,po.y,r,r*.45,6); ctx.stroke(); } }
   function drawParticles(room){ for(const p of room.particles){ const a=clamp(p.life/p.max,0,1); ctx.globalAlpha=a; ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=10; ctx.beginPath(); ctx.arc(p.x,p.y,p.r*a,0,TAU); ctx.fill(); } ctx.globalAlpha=1; ctx.shadowBlur=0; }
-  function drawFloats(room){ ctx.textAlign='center'; ctx.font='900 18px system-ui,sans-serif'; for(const f of room.floats){ ctx.globalAlpha=clamp(f.life/.5,0,1); ctx.fillStyle=f.color; ctx.fillText(f.text,f.x,f.y); } ctx.globalAlpha=1; ctx.textAlign='left'; }
+  function drawFloats(room){ ctx.textAlign='center'; for(const f of room.floats){ ctx.globalAlpha=clamp(f.life/.5,0,1); if(f.big){ ctx.font='900 28px system-ui,sans-serif'; ctx.shadowColor=f.color; ctx.shadowBlur=16; ctx.fillStyle='#fff'; ctx.fillText(f.text,f.x,f.y); ctx.shadowBlur=0; } else { ctx.font='900 18px system-ui,sans-serif'; ctx.fillStyle=f.color; ctx.fillText(f.text,f.x,f.y); } } ctx.globalAlpha=1; ctx.textAlign='left'; }
+  function drawDangerIndicators(room,p){
+    const margin=28, triSize=12; let count=0;
+    for(const e of room.enemies){
+      if(e.hp<=0 || count>=8) break;
+      const sx=e.x-camX, sy=e.y-camY;
+      if(sx>margin && sx<W-margin && sy>margin && sy<H-margin) continue; // on screen
+      count++;
+      const cx=clamp(sx,margin,W-margin), cy=clamp(sy,margin,H-margin);
+      const angle=Math.atan2(sy-H*.5,sx-W*.5);
+      const isTele=e.type==='charger'&&e.tele>0;
+      const s=isTele?triSize*1.6:triSize;
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(angle);
+      ctx.globalAlpha=isTele?.95:.55;
+      ctx.fillStyle=isTele?'#ff3333':e.color;
+      ctx.beginPath(); ctx.moveTo(s,0); ctx.lineTo(-s*.5,-s*.6); ctx.lineTo(-s*.5,s*.6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
   function drawTouchPads(){ if(state.mode!=='play') return; drawPad(state.input.moveTouch,'#7dfdff','MOVE'); drawPad(state.input.aimTouch,'#ffd36e','AIM'); }
   function drawPad(pad,color,label){ if(pad.id===null) return; ctx.save(); ctx.globalAlpha=.72; ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(pad.startX,pad.startY,70,0,TAU); ctx.stroke(); ctx.globalAlpha=.95; ctx.fillStyle=color+'44'; ctx.beginPath(); ctx.arc(pad.startX+pad.dx*70,pad.startY+pad.dy*70,28,0,TAU); ctx.fill(); ctx.fillStyle=color; ctx.font='900 11px system-ui,sans-serif'; ctx.textAlign='center'; ctx.fillText(label,pad.startX,pad.startY+92); ctx.restore(); }
   function drawVignette(th){ const g=ctx.createRadialGradient(W*.5,H*.48,Math.min(W,H)*.22,W*.5,H*.5,Math.max(W,H)*.75); g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.38)'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); }
@@ -930,7 +973,7 @@
   function showOverlay(title,copy,buttons){ ui.overlayTitle.textContent=title; ui.overlayCopy.textContent=copy; ui.overlayButtons.innerHTML=''; for(const [label,fn] of buttons){ const b=document.createElement('button'); b.className='bigBtn'; b.textContent=label; b.onclick=fn; ui.overlayButtons.appendChild(b); } ui.overlay.classList.add('show'); }
   function hideOverlay(){ ui.overlay.classList.remove('show'); }
   function hideUpgrade(){ ui.upgrade.classList.remove('show'); }
-  function showTitle(){ state.mode='title'; showOverlay('Boon Moots', 'Neon 80s boot-haunt arcade.\n\nReceipts bite, cones charge, mirrors remember your aim, carts have opinions, and the boost now does a clean spin instead of a backflip from the wrong acid cabinet.\n\nMobile: left thumb moves/flick-dashes. Right thumb aims/fires/tap-pulses.\nPC: WASD, mouse, Shift, E.', [['Start daily run',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Codex',()=>toggleCodex(true)]]); updateHUD(); }
+  function showTitle(){ state.mode='title'; showOverlay('Boon Moots', 'Neon 80s boot-haunt arcade.\n\nReceipts bite, cones charge, mirrors remember your aim, carts have opinions, and the boost now does a clean spin instead of a backflip from the wrong acid cabinet.\n\nMobile: left thumb moves/flick-dashes. Right thumb aims/fires/tap-pulses.\nPC: WASD, mouse, Shift, E.', [['Start daily run',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Codex',()=>toggleCodex(true)],['Shrine',()=>showShrine()]]); updateHUD(); }
   function toggleSound(){ state.muted=!state.muted; state.save.sound=!state.muted; audio.mute(state.muted); if(!state.muted) audio.ensure(); saveNow(); updateHUD(); }
   function togglePause(){
     if(state.mode==='pause'){ ui.pause.classList.remove('show'); state.mode=state.oldMode||'play'; }
@@ -975,6 +1018,10 @@
     ui.codexBody.innerHTML=`<h3>Bestiary</h3><div class="codexGrid">${bestiaryHtml}</div><h3>Basics</h3><div class="codexGrid"><div class="codexCard"><b>Thumbs</b><p>Left moves. Right aims. Flick left. Tap right. No button farm.</p></div><div class="codexCard"><b>Rooms</b><p>Clear. Choose. Scale. Room 13 tells the truth. Then it keeps going.</p></div><div class="codexCard"><b>Care</b><p>Lamps, benches, umbrellas, and pie help before they explain.</p></div></div><h3>Lifetime Stats</h3><p>Runs: ${(state.save.runs||0).toLocaleString()} · Best score: ${Math.floor(state.save.bestScore||0).toLocaleString()} · Best room: ${state.save.bestRoom||0}<br>Total kills: ${(state.save.totalKills||0).toLocaleString()} · Total rooms: ${(state.save.totalRooms||0).toLocaleString()} · Sparks: ${(state.save.sparks||0).toLocaleString()}<br>Favorite upgrade: ${favUp}</p><h3>Notices</h3><ol>${notices.length?notices.map(n=>`<li>${html(n)}</li>`).join(''):'<li>No notices yet. Go make the road nervous.</li>'}</ol>`;
   }
   ui.sound.addEventListener('click', toggleSound); ui.codexBtn.addEventListener('click', () => toggleCodex(true)); ui.closeCodex.addEventListener('click', () => toggleCodex());
+  ui.resumeBtn.addEventListener('click', () => togglePause());
+  ui.pauseCodexBtn.addEventListener('click', () => { togglePause(); toggleCodex(true); });
+  ui.pauseSoundBtn.addEventListener('click', () => { toggleSound(); ui.pauseSoundBtn.textContent=state.muted?'sound off':'sound on'; });
+  ui.closeShrine.addEventListener('click', () => hideShrine());
 
   let last=performance.now(); function frame(t){ const dt=Math.min(.05,(t-last)/1000); last=t; update(dt); draw(); requestAnimationFrame(frame); }
   function finalSave(){ if(state.run){ state.save.bestScore=Math.max(state.save.bestScore||0,Math.floor(state.run.score)); state.save.bestRoom=Math.max(state.save.bestRoom||0,state.run.level); } saveNow(); }
