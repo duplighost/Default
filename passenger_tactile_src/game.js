@@ -1,8 +1,8 @@
 (() => {
   'use strict';
 
-  const VERSION = '3.2.0-boon-moots-spin-enemies';
-  const SAVE_KEY = 'boon.moots.spin.enemies.v32';
+  const VERSION = '3.3.0-boon-moots-ultimate';
+  const SAVE_KEY = 'boon.moots.ultimate.v33';
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 
@@ -57,7 +57,7 @@
   function coarse(){ return matchMedia('(hover:none), (pointer:coarse)').matches; }
   function reduced(){ return matchMedia('(prefers-reduced-motion: reduce)').matches; }
 
-  let W=1,H=1,DPR=1,mobile=false,portrait=true;
+  let W=1,H=1,DPR=1,mobile=false,portrait=true,viewScale=1;
   let camX=0, camY=0, shake=0, flash=0, slowMo=0, hitPause=0;
   let enemyId = 1;
 
@@ -65,6 +65,7 @@
     mobile = coarse() || innerWidth < 760 || innerHeight < 560;
     portrait = innerHeight >= innerWidth;
     DPR = Math.min(mobile ? 1.35 : 2, Math.max(1, devicePixelRatio || 1));
+    viewScale = mobile ? (portrait ? .52 : .70) : 1;
     W = Math.max(320, Math.floor(innerWidth));
     H = Math.max(320, Math.floor(innerHeight));
     canvas.width = Math.floor(W * DPR);
@@ -151,18 +152,18 @@
   };
 
   const upgradeDefs = [
-    {id:'clean', icon:'↯', name:'Nintendo Clean', sub:'Start smoother. Stop sharper.', apply(p){ p.speed += 22; p.accel += 2.0; p.stop += 2.2; p.turn += 1.2; }},
-    {id:'rate', icon:'♪', name:'Front-to-Back Fire', sub:'Hold aim. The hook speeds up.', apply(p){ p.fireDelay *= .86; p.song += 1; }},
+    {id:'clean', icon:'↯', name:'Snap Start', sub:'Start cleaner. Stop on purpose.', apply(p){ p.speed += 24; p.accel += 2.4; p.stop += 2.8; p.turn += 1.6; }},
+    {id:'rate', icon:'♪', name:'Mixtape Motor', sub:'Fire faster while the hook loops.', apply(p){ p.fireDelay *= .86; p.song += 1; }},
     {id:'bite', icon:'✶', name:'Bubblegum Bite', sub:'Shots hit harder.', apply(p){ p.damage *= 1.18; }},
     {id:'split', icon:'≋', name:'Sidecar Sparks', sub:'Aim throws side sparks.', apply(p){ p.split += 1; }},
-    {id:'dash', icon:'👢', name:'Boon Boot Flick', sub:'Dash sooner. Leave teeth.', apply(p){ p.dashCdBase *= .84; p.dashTrail += 1; }},
+    {id:'dash', icon:'👢', name:'Boon Boot Flick', sub:'Dash farther. Come back sooner.', apply(p){ p.dashCdBase *= .82; p.dashTrail += 1; }},
     {id:'magnet', icon:'●', name:'Ness Magnet Nerve', sub:'Good things lean closer.', apply(p){ p.pickup += 42; p.magnet += 1; }},
     {id:'tipper', icon:'◇', name:'Marth Tipper Clause', sub:'Far shots cut cleaner.', apply(p){ p.tipper += 1; p.crit += .04; }},
     {id:'pika', icon:'ϟ', name:'Tiny Thunder', sub:'Hits jump when bored.', apply(p){ p.chain += 1; }},
     {id:'gigi', icon:'🐾', name:'Gigi Management', sub:'The cat makes calls.', apply(p){ p.cat += 1; }},
-    {id:'care', icon:'♡', name:'Care Literacy', sub:'Helpful things get easier to read.', apply(p){ p.care += 1; p.maxHp += 1; p.hp = Math.min(p.maxHp, p.hp+1); }},
+    {id:'care', icon:'♡', name:'Helpful Furniture', sub:'Good objects glow harder.', apply(p){ p.care += 1; p.maxHp += 1; p.hp = Math.min(p.maxHp, p.hp+1); }},
     {id:'pulse', icon:'☉', name:'No-Moon Pulse', sub:'Right-tap hits wider.', apply(p){ p.pulseRadius += 45; p.pulseGain += .35; }},
-    {id:'paper', icon:'▰', name:'Paper Badge Slot', sub:'One more choice.', apply(p){ p.badges += 1; p.maxHp += 1; p.hp = Math.min(p.maxHp, p.hp+1); }},
+    {id:'paper', icon:'▰', name:'Pocket Heart', sub:'A heart now. Sparks lean closer.', apply(p){ p.maxHp += 1; p.hp = Math.min(p.maxHp, p.hp+2); p.pickup += 34; }},
     {id:'knife', icon:'◆', name:'Glass Valentine', sub:'Hit harder. Bleed easier.', apply(p){ p.damage *= 1.34; p.maxHp = Math.max(2, p.maxHp-1); p.hp = Math.min(p.hp,p.maxHp); }},
     {id:'echo', icon:'↩', name:'Echo Wall', sub:'Walls remember your name.', apply(p){ p.bounce = (p.bounce||0) + 1; }},
     {id:'halo', icon:'◎', name:'Halo Drain', sub:'Closer kills feed the quiet.', apply(p){ p.haloDrain = (p.haloDrain||0) + 1; }}
@@ -183,9 +184,9 @@
   function makePlayer(){ return {
     x:750,y:650,vx:0,vy:0,r:20,aimX:1,aimY:0,face:0,
     hp:5,maxHp:5,shield:0,inv:0,hurt:0,
-    speed:288,accel:20.5,stop:32,turn:19,lateral:9.2,
+    speed:304,accel:24.5,stop:37.5,turn:30,lateral:13.5,
     fireDelay:.172,fireCd:0,damage:15,pulse:24,pulseGain:1,pulseRadius:305,
-    dashCdBase:.72,dashCd:0,dashT:0,dashDur:.165,dashSpinDir:1,dashTrail:0,
+    dashCdBase:.43,dashCd:0,dashT:0,dashDur:.165,dashSpinDir:1,dashTrail:0,
     pickup:104,magnet:0,split:0,tipper:0,crit:.03,chain:0,cat:0,care:0,badges:0,song:0,
     bounce:0,haloDrain:0,
     shots:0,dashes:0,stillT:0,aimT:0,roomHit:false,wasMoving:false,brakeT:0,lastSpeed:0,after:[]
@@ -218,14 +219,14 @@
     const theme = themes[(run.level-1) % themes.length];
     state.room = makeRoom(run.level, theme);
     const p=run.player; p.x=state.room.w*.5; p.y=state.room.h*.66; p.vx=p.vy=0; p.inv=.9; p.roomHit=false; p.stillT=0;
-    camX=p.x-W*.5; camY=p.y-H*.5;
+    camX=p.x-(W/viewScale)*.5; camY=p.y-(H/viewScale)*.5;
     if(run.level === 8 && !run.observed){ run.observed=true; addNotice(behaviorNotices.care); whisper('the room starts leaving useful things'); }
     if(run.level === 14 && !run.overdrive){ run.overdrive=true; addNotice(behaviorNotices.endless); whisper('no ceiling now'); }
   }
 
   function makeRoom(level, theme){
     const rng=state.rng;
-    const room = {level,theme,w:1500,h:1050,enemies:[],bullets:[],pickups:[],particles:[],floats:[],obstacles:[],decor:[],care:[],portals:[],cleared:false,clearT:0,time:0,spawnT:0};
+    const room = {level,theme,w:1500,h:(mobile&&portrait?1480:1050),enemies:[],bullets:[],pickups:[],particles:[],floats:[],obstacles:[],decor:[],care:[],portals:[],cleared:false,clearT:0,time:0,spawnT:0};
     const decorCount = mobile ? 16 : 28;
     for(let i=0;i<decorCount;i++) room.decor.push({x:randR(70,room.w-70,rng),y:randR(70,room.h-70,rng),r:randR(4,18,rng),a:rng()*TAU,kind:pick(['spark','paper','cassette','leaf','stone'],rng)});
     const obsCount = mobile ? 3 : 5;
@@ -456,7 +457,7 @@
       const brake=p.stop + Math.min(13,beforeSpeed/65);
       p.vx=damp(p.vx,0,brake,dt); p.vy=damp(p.vy,0,brake,dt); if(Math.hypot(p.vx,p.vy)<7){p.vx=0;p.vy=0;}
     }
-    const maxV=p.speed*(p.dashT>0?2.92:1.055); let sp=Math.hypot(p.vx,p.vy); if(sp>maxV){ p.vx=p.vx/sp*maxV; p.vy=p.vy/sp*maxV; sp=maxV; }
+    const maxV=p.speed*(p.dashT>0?4.65:1.055); let sp=Math.hypot(p.vx,p.vy); if(sp>maxV){ p.vx=p.vx/sp*maxV; p.vy=p.vy/sp*maxV; sp=maxV; }
     p.x+=p.vx*dt; p.y+=p.vy*dt; p.x=clamp(p.x,38,room.w-38); p.y=clamp(p.y,38,room.h-38); for(const o of room.obstacles) resolveCircleObstacle(p,o);
     if(sp>44 && !reduced() && room.particles.length<budget()) room.particles.push({kind:'trail',x:p.x-p.vx*.03,y:p.y-p.vy*.03,vx:-p.vx*.055,vy:-p.vy*.055,r:9+sp*.026,life:p.dashT>0?.13:.16,max:p.dashT>0?.13:.16,color:p.dashT>0?room.theme.c:room.theme.a});
     p.after.unshift({x:p.x,y:p.y,face:p.face,spin:dashSpinPhase(p),life:p.dashT>0?.13:.16}); if(p.after.length>(mobile?6:9)) p.after.pop(); for(let i=p.after.length-1;i>=0;i--){p.after[i].life-=dt; if(p.after[i].life<=0) p.after.splice(i,1);}
@@ -466,12 +467,10 @@
   function tryDash(dx=null,dy=null){
     if(state.mode!=='play'||!state.run) return; const p=state.run.player; if(p.dashCd>0) return;
     if(dx==null){ const m=getMoveInput(); if(m.active){dx=m.x;dy=m.y;} else {dx=p.aimX;dy=p.aimY;} }
-    const n=norm(dx,dy); p.vx=n.x*830; p.vy=n.y*830; p.dashDur=.185; p.dashT=p.dashDur; p.dashSpinDir=(Math.abs(n.x)>.16?Math.sign(n.x):Math.sign(p.aimX||1))||1; p.inv=Math.max(p.inv,.30); p.dashCd=p.dashCdBase; p.dashes++;
-    audio.hit('dash'); haptic(20); tactilePause(14); shake=Math.max(shake,.13);
-    const room=state.room; for(let i=0;i<18;i++) particle(room,p.x-n.x*10,p.y-n.y*10,room.theme.c,rand(-n.x*280-80,-n.x*120+80),rand(-n.y*280-80,-n.y*120+80),.28,2+Math.random()*3);
-    if(p.dashTrail){
-      for(const e of room.enemies){ const d=dist(p.x,p.y,e.x,e.y); if(d<105+e.r+p.dashTrail*10){ const k=norm(e.x-p.x,e.y-p.y); damageEnemy(e,p.damage*(.65+.15*p.dashTrail),k.x*360,k.y*360,'dash'); } }
-    }
+    const n=norm(dx,dy); p.vx=n.x*1325; p.vy=n.y*1325; p.dashDur=.295; p.dashT=p.dashDur; p.dashSpinDir=(n.x*p.aimY-n.y*p.aimX)>=0?1:-1; p.inv=Math.max(p.inv,.36); p.dashCd=p.dashCdBase; p.dashes++;
+    audio.hit('dash'); haptic(14); tactilePause(5); shake=Math.max(shake,.075);
+    const room=state.room; for(let i=0;i<28;i++) particle(room,p.x-n.x*10,p.y-n.y*10,room.theme.c,rand(-n.x*420-90,-n.x*150+90),rand(-n.y*420-90,-n.y*150+90),.32,2+Math.random()*3.8);
+    for(const e of room.enemies){ const d=dist(p.x,p.y,e.x,e.y); if(d<124+e.r+p.dashTrail*20){ const k=norm(e.x-p.x,e.y-p.y); damageEnemy(e,p.damage*(.55+.18*Math.max(1,p.dashTrail)),k.x*390,k.y*390,'dash'); } }
   }
 
   function firePlayer(p,ax,ay){
