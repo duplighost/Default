@@ -219,6 +219,7 @@
     const theme = themes[(run.level-1) % themes.length];
     state.room = makeRoom(run.level, theme);
     const p=run.player; p.x=state.room.w*.5; p.y=state.room.h*.66; p.vx=p.vy=0; p.inv=.9; p.roomHit=false; p.stillT=0; p.dashT=0; p.wasMoving=false; p.brakeT=0; p.after.length=0;
+    hardClearTouchPads(); state.input.suppressUntil=performance.now()+160;
     camX=p.x-(W/viewScale)*.5; camY=p.y-(H/viewScale)*.5;
     if(run.level === 8 && !run.observed){ run.observed=true; addNotice(behaviorNotices.care); whisper('the room starts leaving useful things'); }
     if(run.level === 14 && !run.overdrive){ run.overdrive=true; addNotice(behaviorNotices.endless); whisper('no ceiling now'); }
@@ -299,6 +300,8 @@
     if(pad.len>.08) pad.lastAngle=Math.atan2(pad.dy,pad.dx);
   }
   function clearPad(pad){ pad.id=null; pad.dx=pad.dy=pad.len=0; pad.maxLen=0; pad.speed=0; pad.dashed=false; }
+  function hardClearPad(pad){ pad.id=null; pad.startX=pad.startY=pad.x=pad.y=0; pad.dx=pad.dy=pad.len=pad.maxLen=pad.prevLen=pad.speed=0; pad.dashLatch=false; pad.dashed=false; pad.lastAngle=null; }
+  function hardClearTouchPads(){ hardClearPad(state.input.moveTouch); hardClearPad(state.input.aimTouch); }
   function assignTouch(touch){
     const left = touch.clientX < W*.5;
     if(left){
