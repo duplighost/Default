@@ -214,7 +214,7 @@
     shots:0,dashes:0,stillT:0,aimT:0,roomHit:false,wasMoving:false,brakeT:0,lastSpeed:0,after:[]
   }; }
 
-  function startRun(seedText=todaySeed()){
+  function startRun(seedText=Date.now()){
     const seed = hashString(String(seedText)+'|thumbprint|'+(state.save.runs||0));
     state.rng = mulberry32(seed);
     state.run = {seed, level:0, score:0, combo:1, comboT:0, kills:0, roomKills:0, upgrades:[], overdrive:false, observed:false, truth:false, streak:0, streakT:0};
@@ -370,7 +370,7 @@
   addEventListener('keydown', e => {
     const k=e.key.toLowerCase(); state.keys[k]=true;
     if(['arrowup','arrowdown','arrowleft','arrowright',' ','tab'].includes(k)) e.preventDefault();
-    if(k==='enter' && state.mode==='title') startRun(todaySeed());
+    if(k==='enter' && state.mode==='title') startRun();
     if(k==='shift') tryDash();
     if(k==='e' || k==='x') tryPulse();
     if(k==='tab') toggleCodex();
@@ -379,7 +379,7 @@
   }, {passive:false});
   addEventListener('keyup', e => { state.keys[e.key.toLowerCase()]=false; }, {passive:true});
   canvas.addEventListener('pointermove', e => { if(coarse()) return; state.mouse.x=e.clientX; state.mouse.y=e.clientY; state.mouse.seen=true; }, {passive:true});
-  canvas.addEventListener('pointerdown', e => { if(state.mode==='title'){ startRun(todaySeed()); return; } if(state.mode!=='play') return; audio.ensure(); if(!coarse()){ state.mouse.down=true; state.mouse.x=e.clientX; state.mouse.y=e.clientY; state.mouse.seen=true; if(e.button===2) tryPulse(); } }, {passive:false});
+  canvas.addEventListener('pointerdown', e => { if(state.mode==='title'){ startRun(); return; } if(state.mode!=='play') return; audio.ensure(); if(!coarse()){ state.mouse.down=true; state.mouse.x=e.clientX; state.mouse.y=e.clientY; state.mouse.seen=true; if(e.button===2) tryPulse(); } }, {passive:false});
   addEventListener('pointerup', e => { if(e.button===0) state.mouse.down=false; }, {passive:true});
   canvas.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -766,7 +766,7 @@
 
   function die(){
     const run=state.run; state.mode='dead'; state.save.bestScore=Math.max(state.save.bestScore||0,Math.floor(run.score)); state.save.bestRoom=Math.max(state.save.bestRoom||0,run.level); saveNow();
-    showOverlay('The boon boots remain.', `Score ${Math.floor(run.score).toLocaleString()} · Room ${run.level}.\n${pick(['A shopping cart wrote your obituary in magenta crayon. The wheel squeaked during the eulogy.','You were killed by a sentence with too much confidence.','The road writes TRY AGAIN on a receipt and refuses to itemize the grief.'])}`, [['Run it back',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Codex',()=>toggleCodex(true)],['Shrine',()=>showShrine()]]);
+    showOverlay('The boon boots remain.', `Score ${Math.floor(run.score).toLocaleString()} · Room ${run.level}.`, [['Run it back',()=>startRun()],['Codex',()=>toggleCodex(true)],['Shrine',()=>showShrine()]]);
   }
 
   function particle(room,x,y,color,vx,vy,life=.45,r=3){ if(!room || room.particles.length>budget()) return; room.particles.push({x,y,vx,vy,life,max:life,r,color}); }
@@ -1041,7 +1041,7 @@
   function showOverlay(title,copy,buttons){ ui.overlayTitle.textContent=title; ui.overlayCopy.textContent=copy; ui.overlayButtons.innerHTML=''; for(const [label,fn] of buttons){ const b=document.createElement('button'); b.className='bigBtn'; b.textContent=label; b.onclick=fn; ui.overlayButtons.appendChild(b); } ui.overlay.classList.add('show'); }
   function hideOverlay(){ ui.overlay.classList.remove('show'); }
   function hideUpgrade(){ ui.upgrade.classList.remove('show'); }
-  function showTitle(){ state.mode='title'; showOverlay('Boon Moots', 'The road grins. The boots answer.', [['Start daily run',()=>startRun(todaySeed())],['Random run',()=>startRun(Date.now())],['Codex',()=>toggleCodex(true)],['Shrine',()=>showShrine()]]); updateHUD(); }
+  function showTitle(){ state.mode='title'; showOverlay('Boon Moots', 'The road grins. The boots answer.', [['Play',()=>startRun()],['Shrine',()=>showShrine()],['Codex',()=>toggleCodex(true)]]); updateHUD(); }
   function toggleSound(){ state.muted=!state.muted; state.save.sound=!state.muted; audio.mute(state.muted); if(!state.muted) audio.ensure(); saveNow(); updateHUD(); }
   function togglePause(){
     if(state.mode==='pause'){ ui.pause.classList.remove('show'); state.mode=state.oldMode||'play'; }
@@ -1102,7 +1102,7 @@
     return {ok:small.length===0 && document.documentElement.scrollWidth<=innerWidth+1, version:VERSION, viewport:{w:innerWidth,h:innerHeight,dpr:DPR,mobile,portrait}, horizontalOverflow:document.documentElement.scrollWidth-innerWidth, smallTargets:small, state:window.passengerThumbprintDebug()};
   };
   window.passengerTactileDebug = window.passengerThumbprintDebug = () => ({version:VERSION,mode:state.mode,room:state.room?{level:state.room.level,enemies:state.room.enemies.length,bullets:state.room.bullets.length,particles:state.room.particles.length,cleared:state.room.cleared}:null,run:state.run?{score:Math.floor(state.run.score),level:state.run.level,hp:state.run.player.hp,pulse:Math.floor(state.run.player.pulse),upgrades:state.run.upgrades}:null,save:state.save});
-  window.passengerTactileStart = window.passengerThumbprintStart = () => startRun(todaySeed());
+  window.passengerTactileStart = window.passengerThumbprintStart = () => startRun();
   window.passengerTactileUnlockAll = window.passengerThumbprintUnlockAll = () => { state.save.notices=[...clearLines,...Object.values(behaviorNotices)]; saveNow(); renderCodex(); return state.save; };
   window.passengerTactileReset = window.passengerThumbprintReset = () => { localStorage.removeItem(SAVE_KEY); location.reload(); };
 
