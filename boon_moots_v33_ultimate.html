@@ -240,7 +240,7 @@
     const run=state.run; run.level += 1; run.roomKills = 0;
     const theme = themes[(run.level-1) % themes.length];
     state.room = makeRoom(run.level, theme);
-    const p=run.player; p.x=state.room.w*.5; p.y=state.room.h*.66; p.vx=p.vy=0; p.inv=.9; p.roomHit=false; p.stillT=0;
+    const p=run.player; p.x=state.room.w*.5; p.y=state.room.h*.66; p.vx=p.vy=0; p.inv=.9; p.roomHit=false; p.stillT=0; p.dashT=0; p.wasMoving=false; p.brakeT=0; p.after.length=0;
     camX=p.x-(W/viewScale)*.5; camY=p.y-(H/viewScale)*.5;
     if(run.level === 8 && !run.observed){ run.observed=true; addNotice(behaviorNotices.care); whisper('the room starts leaving useful things'); }
     if(run.level === 14 && !run.overdrive){ run.overdrive=true; addNotice(behaviorNotices.endless); whisper('no ceiling now'); }
@@ -431,7 +431,6 @@
     slowMo=Math.max(0,slowMo-raw); hitPause=Math.max(0,hitPause-raw); shake=Math.max(0,shake-raw*2.25); flash=Math.max(0,flash-raw*1.7);
     if(!state.run || !state.room || state.mode==='title') return;
     if(state.mode==='upgrade' || state.mode==='codex' || state.mode==='dead' || state.mode==='pause' || state.mode==='shrine'){ updateParticles(state.room,raw); return; }
-    if(transition.active){ transition.timer+=raw; if(transition.timer>=transition.duration){ transition.active=false; if(transition.callback) transition.callback(); } updateParticles(state.room,raw); return; }
     if(hitPause>0){ updateParticles(state.room, raw*.55); updateHUD(); return; }
     const dt = Math.min(.033, raw) * (slowMo>0 ? .55 : 1);
     const room=state.room, p=state.run.player; room.time += raw;
@@ -760,7 +759,7 @@
     state.mode='upgrade'; const p=state.run.player, rng=state.rng; const count=p.badges>=2?4:3; const pool=upgradeDefs.slice(); const choices=[]; while(choices.length<count && pool.length){ choices.push(pool.splice(Math.floor(rng()*pool.length),1)[0]); }
     ui.upgradeTitle.textContent = state.run.level===13 ? 'Pick what survives.' : 'Pick what changes.';
     ui.upgradeCards.innerHTML='';
-    for(const u of choices){ const b=document.createElement('button'); b.className='upgradeCard'; b.innerHTML=`<div class="uIcon">${html(u.icon)}</div><b>${html(u.name)}</b><p>${html(u.sub)}</p>`; b.onclick=()=>{ u.apply(p); state.run.upgrades.push(u.id); if(!state.save.upgradePicks) state.save.upgradePicks={}; state.save.upgradePicks[u.id]=(state.save.upgradePicks[u.id]||0)+1; hideUpgrade(); startTransition(); saveNow(); }; ui.upgradeCards.appendChild(b); }
+    for(const u of choices){ const b=document.createElement('button'); b.className='upgradeCard'; b.innerHTML=`<div class="uIcon">${html(u.icon)}</div><b>${html(u.name)}</b><p>${html(u.sub)}</p>`; b.onclick=()=>{ u.apply(p); state.run.upgrades.push(u.id); if(!state.save.upgradePicks) state.save.upgradePicks={}; state.save.upgradePicks[u.id]=(state.save.upgradePicks[u.id]||0)+1; hideUpgrade(); state.mode='play'; nextRoom(); saveNow(); }; ui.upgradeCards.appendChild(b); }
     ui.upgrade.classList.add('show');
   }
 
@@ -785,7 +784,6 @@
     ctx.restore();
     if(state.mode==='play') drawDangerIndicators(room,p);
     drawTouchPads(); drawVignette(room.theme); if(flash>0){ ctx.fillStyle=`rgba(255,255,255,${Math.min(.18,flash*.16)})`; ctx.fillRect(0,0,W,H); }
-    if(transition.active) drawTransition();
   }
 
   function drawTitleBg(){
