@@ -1,10 +1,13 @@
 (() => {
   'use strict';
 
-  const VERSION = '3.3.0-boon-moots-ultimate';
-  const SAVE_KEY = 'boon.moots.ultimate.v33';
+  const VERSION = '4.0.0-boon-moots-ultimate';
+  const SAVE_KEY = 'boon.moots.ultimate.v40';
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+
+  const bloomCanvas = document.createElement('canvas');
+  const bloomCtx = bloomCanvas.getContext('2d');
 
   const ui = {
     overlay: document.getElementById('overlay'),
@@ -73,20 +76,22 @@
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
     ctx.setTransform(DPR,0,0,DPR,0,0);
+    bloomCanvas.width = Math.floor(W * DPR * 0.5);
+    bloomCanvas.height = Math.floor(H * DPR * 0.5);
   }
   addEventListener('resize', resize, {passive:true});
   resize();
 
   const themes = [
-    {id:'causeway', name:'Passenger Causeway', bg:'#090612', floor:'#171021', a:'#7dfdff', b:'#ff4fd8', c:'#ffd36e', bad:'#ff6b6b', icon:'◁'},
-    {id:'arcade', name:'October Arcade', bg:'#10051d', floor:'#210b35', a:'#ff4fd8', b:'#7dfdff', c:'#ff9c40', bad:'#ff6b6b', icon:'▣'},
-    {id:'market', name:'Signal Market', bg:'#071319', floor:'#0d2631', a:'#b5ff7e', b:'#7dfdff', c:'#ffd36e', bad:'#ff6b6b', icon:'◇'},
-    {id:'lake', name:'Missing-Moon Lake', bg:'#070c22', floor:'#111d3b', a:'#f6f0ff', b:'#84e9ff', c:'#ffb6f0', bad:'#ff6b6b', icon:'☾'},
-    {id:'orchard', name:'Neon Orchard', bg:'#06140e', floor:'#112919', a:'#b5ff7e', b:'#ff4fd8', c:'#ffd36e', bad:'#ff6b6b', icon:'✦'},
-    {id:'shelf', name:'Listening Shelf', bg:'#090515', floor:'#211534', a:'#bd93ff', b:'#ff7bd5', c:'#7dfdff', bad:'#ff6b6b', icon:'♪'},
-    {id:'sludge', name:'Sludge Courts', bg:'#17070e', floor:'#281019', a:'#ff6b6b', b:'#ffd36e', c:'#b5ff7e', bad:'#ff385d', icon:'!'},
-    {id:'kindness', name:'Dead City Trying', bg:'#071215', floor:'#13262b', a:'#9bffd1', b:'#ffd36e', c:'#f6f0ff', bad:'#ff6b6b', icon:'♡'},
-    {id:'observatory', name:'Backseat Observatory', bg:'#070411', floor:'#17102b', a:'#ffd36e', b:'#f6f0ff', c:'#7dfdff', bad:'#ff6b6b', icon:'★'}
+    {id:'causeway', name:'Passenger Causeway', bg:'#090612', floor:'#171021', a:'#7dfdff', b:'#ff4fd8', c:'#ffd36e', bad:'#ff6b6b', icon:'◁', ambient:['fireflies','pollen'], obsStyle:'machine', hazardType:'fog'},
+    {id:'arcade', name:'October Arcade', bg:'#10051d', floor:'#210b35', a:'#ff4fd8', b:'#7dfdff', c:'#ff9c40', bad:'#ff6b6b', icon:'▣', ambient:['sparks','embers'], obsStyle:'prism', hazardType:'pulse'},
+    {id:'market', name:'Signal Market', bg:'#071319', floor:'#0d2631', a:'#b5ff7e', b:'#7dfdff', c:'#ffd36e', bad:'#ff6b6b', icon:'◇', ambient:['petals','fireflies'], obsStyle:'mushroom', hazardType:'spore'},
+    {id:'lake', name:'Missing-Moon Lake', bg:'#070c22', floor:'#111d3b', a:'#f6f0ff', b:'#84e9ff', c:'#ffb6f0', bad:'#ff6b6b', icon:'☾', ambient:['rain','spores'], obsStyle:'mound', hazardType:'fog'},
+    {id:'orchard', name:'Neon Orchard', bg:'#06140e', floor:'#112919', a:'#b5ff7e', b:'#ff4fd8', c:'#ffd36e', bad:'#ff6b6b', icon:'✦', ambient:['petals','pollen'], obsStyle:'mushroom', hazardType:'spore'},
+    {id:'shelf', name:'Listening Shelf', bg:'#090515', floor:'#211534', a:'#bd93ff', b:'#ff7bd5', c:'#7dfdff', bad:'#ff6b6b', icon:'♪', ambient:['spores','fireflies'], obsStyle:'prism', hazardType:'fog'},
+    {id:'sludge', name:'Sludge Courts', bg:'#17070e', floor:'#281019', a:'#ff6b6b', b:'#ffd36e', c:'#b5ff7e', bad:'#ff385d', icon:'!', ambient:['embers','ash'], obsStyle:'mound', hazardType:'pulse'},
+    {id:'kindness', name:'Dead City Trying', bg:'#071215', floor:'#13262b', a:'#9bffd1', b:'#ffd36e', c:'#f6f0ff', bad:'#ff6b6b', icon:'♡', ambient:['pollen','rain'], obsStyle:'mushroom', hazardType:'fog'},
+    {id:'observatory', name:'Backseat Observatory', bg:'#070411', floor:'#17102b', a:'#ffd36e', b:'#f6f0ff', c:'#7dfdff', bad:'#ff6b6b', icon:'★', ambient:['sparks','ash'], obsStyle:'machine', hazardType:'pulse'}
   ];
 
   const clearLines = [
@@ -128,7 +133,11 @@
     mirror:  {icon:'🪞', name:'Mirror Passenger', desc:'Shoots where you are aiming. Orbits like regret.'},
     moon:    {icon:'🌙', name:'Porchlight Warden', desc:'Slow orbit, fan-fires arcs of bullets.'},
     wraith:  {icon:'👻', name:'Phase Wraith', desc:'Phases in and out. Invisible wraiths rush; visible ones lunge.'},
-    boss:    {icon:'💀', name:'Backseat Driver', desc:'Radial barrages, summons minions. The decorative liability.'}
+    boss:    {icon:'💀', name:'Backseat Driver', desc:'Radial barrages, summons minions. The decorative liability.'},
+    sniper:  {icon:'🕯', name:'Long Candle', desc:'Kites at extreme range. Locks on with a warning beam, then fires one devastating shot.'},
+    turret:  {icon:'📖', name:'Lectern', desc:'Nearly stationary. Fires bullet rings or aimed bursts. A podium with opinions.'},
+    hexer:   {icon:'🔮', name:'Antiphon', desc:'Orbits perpendicular to you and fires bullet rings. The choir that bites.'},
+    myrmidon:{icon:'👑', name:'Crown-Sworn', desc:'Aggressive strafing, spread fire, evasive dash. Loyal to something worse.'}
   };
 
   const shrineDefs = [
@@ -148,7 +157,11 @@
     mirror:  {hp:42, r:24, speed:104, score:122, color:'#bd93ff', label:'Mirror Passenger'},
     moon:    {hp:44, r:26, speed:54, score:120, color:'#f6f0ff', label:'Porchlight Warden'},
     wraith:  {hp:28, r:16, speed:135, score:110, color:'#8866cc', label:'Phase Wraith'},
-    boss:    {hp:340, r:54, speed:74, score:980, color:'#ffffff', label:'Backseat Driver'}
+    boss:    {hp:340, r:54, speed:74, score:980, color:'#ffffff', label:'Backseat Driver'},
+    sniper:  {hp:32, r:17, speed:84, score:130, color:'#9cd7ff', label:'Long Candle'},
+    turret:  {hp:36, r:18, speed:26, score:115, color:'#c494ff', label:'Lectern'},
+    hexer:   {hp:38, r:18, speed:84, score:125, color:'#97ffd6', label:'Antiphon'},
+    myrmidon:{hp:48, r:21, speed:88, score:140, color:'#ffd39a', label:'Crown-Sworn'}
   };
 
   const upgradeDefs = [
@@ -227,15 +240,83 @@
 
   function makeRoom(level, theme){
     const rng=state.rng;
-    const room = {level,theme,w:1500,h:(mobile&&portrait?1480:1050),enemies:[],bullets:[],pickups:[],particles:[],floats:[],obstacles:[],decor:[],care:[],portals:[],cleared:false,clearT:0,time:0,spawnT:0};
+    const room = {level,theme,w:1500,h:(mobile&&portrait?1480:1050),enemies:[],bullets:[],pickups:[],particles:[],floats:[],obstacles:[],decor:[],care:[],portals:[],cleared:false,clearT:0,time:0,spawnT:0,ambient:[],floorDeco:[],hazards:[]};
     const decorCount = mobile ? 16 : 28;
     for(let i=0;i<decorCount;i++) room.decor.push({x:randR(70,room.w-70,rng),y:randR(70,room.h-70,rng),r:randR(4,18,rng),a:rng()*TAU,kind:pick(['spark','paper','cassette','leaf','stone'],rng)});
-    const obsCount = mobile ? 3 : 5;
-    for(let i=0;i<obsCount;i++){
-      const x=randR(170,room.w-230,rng), y=randR(170,room.h-260,rng);
-      if(dist(x,y,room.w*.5,room.h*.66)<260) continue;
-      room.obstacles.push(rng()<.55?{type:'rect',x:x-55,y:y-40,w:110+rng()*110,h:80+rng()*50,r:18}:{type:'circle',x,y,rad:42+rng()*38});
+
+    // Layout system
+    const layouts = ['scatter','scatter','ring','lanes','crossroads','pockets'];
+    const layout = level <= 2 ? 'scatter' : pick(layouts, rng);
+    room.layout = layout;
+
+    if(layout==='ring'){
+      const cx=room.w*.5, cy=room.h*.5, ringR=300;
+      const count=5+Math.floor(rng()*3);
+      for(let i=0;i<count;i++){
+        const a=i*TAU/count+rng()*.3;
+        const x=cx+Math.cos(a)*ringR, y=cy+Math.sin(a)*ringR;
+        room.obstacles.push(rng()<.5?{type:'circle',x,y,rad:42+rng()*32}:{type:'rect',x:x-50,y:y-35,w:100+rng()*60,h:70+rng()*40,r:16});
+      }
+    } else if(layout==='lanes'){
+      const laneW=room.w/3;
+      room.obstacles.push({type:'rect',x:laneW-30,y:80,w:60,h:room.h-160,r:18});
+      room.obstacles.push({type:'rect',x:laneW*2-30,y:80,w:60,h:room.h-160,r:18});
+    } else if(layout==='crossroads'){
+      const cx=room.w*.5, cy=room.h*.5, armW=240;
+      // four corner clusters
+      const corners=[[160,160],[room.w-160,160],[160,room.h-160],[room.w-160,room.h-160]];
+      for(const [ox,oy] of corners){
+        if(dist(ox,oy,cx,cy)<armW) continue;
+        room.obstacles.push({type:'circle',x:ox,y:oy,rad:52+rng()*28});
+        room.obstacles.push({type:'circle',x:ox+rng()*80-40,y:oy+rng()*80-40,rad:32+rng()*22});
+      }
+    } else if(layout==='pockets'){
+      const pocketCount=3+Math.floor(rng()*2);
+      for(let i=0;i<pocketCount;i++){
+        const px=randR(250,room.w-250,rng), py=randR(250,room.h-250,rng);
+        if(dist(px,py,room.w*.5,room.h*.66)<200) continue;
+        const n=2+Math.floor(rng()*3);
+        for(let j=0;j<n;j++){
+          const a=j*TAU/n+rng()*.5; const r=60+rng()*40;
+          room.obstacles.push({type:'circle',x:px+Math.cos(a)*r,y:py+Math.sin(a)*r,rad:34+rng()*26});
+        }
+      }
+    } else {
+      // scatter (original)
+      const obsCount = mobile ? 3 : 5;
+      for(let i=0;i<obsCount;i++){
+        const x=randR(170,room.w-230,rng), y=randR(170,room.h-260,rng);
+        if(dist(x,y,room.w*.5,room.h*.66)<260) continue;
+        room.obstacles.push(rng()<.55?{type:'rect',x:x-55,y:y-40,w:110+rng()*110,h:80+rng()*50,r:18}:{type:'circle',x,y,rad:42+rng()*38});
+      }
     }
+
+    // Ambient particles
+    const ambCount = mobile ? 24 : 40;
+    for(let i=0;i<ambCount;i++){
+      const type = pick(theme.ambient, rng);
+      room.ambient.push({
+        type, x: rng()*room.w, y: rng()*room.h,
+        vx: randR(-12,12,rng), vy: randR(-18,8,rng),
+        phase: rng()*TAU, r: randR(1.5,4,rng)
+      });
+    }
+
+    // Floor decorations
+    const decoTypes = pick([['fogBank','cracks'],['hexes','glowDots'],['roots','pools'],['fogBank','hexes'],['cracks','glowDots'],['roots','fogBank']], rng);
+    const floorCount = mobile ? 18 : 35;
+    for(let i=0;i<floorCount;i++){
+      room.floorDeco.push({type:pick(decoTypes,rng), x:randR(60,room.w-60,rng), y:randR(60,room.h-60,rng), r:randR(20,65,rng), a:rng()*TAU});
+    }
+
+    // Hazard zones
+    if(level >= 5){
+      const n = level >= 10 ? 2 : 1;
+      for(let i=0;i<n;i++){
+        room.hazards.push({type:theme.hazardType, x:randR(200,room.w-200,rng), y:randR(200,room.h-200,rng), rx:randR(70,120,rng), ry:randR(50,90,rng), phase:rng()*TAU, a:rng()*TAU});
+      }
+    }
+
     if(level>=8 || theme.id==='kindness'){
       const n = Math.min(1 + Math.floor((state.run.player.care||0)/2), 3);
       for(let i=0;i<n;i++) room.care.push({x:randR(160,room.w-160,rng),y:randR(130,room.h-190,rng),r:34,used:false,kind:pick(['lamp','bench','umbrella','pie'],rng),phase:rng()*TAU});
@@ -258,9 +339,11 @@
       const pool=['moth','moth','receipt','charger'];
       if(level>2) pool.push('sludge','sludge');
       if(level>4) pool.push('cart');
+      if(level>5) pool.push('turret');
       if(level>6) pool.push('mirror');
-      if(level>7) pool.push('wraith');
-      if(level>9) pool.push('moon');
+      if(level>7) pool.push('wraith','sniper');
+      if(level>9) pool.push('moon','hexer');
+      if(level>11) pool.push('myrmidon');
       const n = clamp(5 + Math.floor(level*1.05) + Math.floor(rng()*3), 5, mobile?21:30);
       for(let i=0;i<n;i++) spawnEnemy(room,pick(pool,rng));
     }
@@ -482,6 +565,15 @@
     p.x+=p.vx*dt; p.y+=p.vy*dt; p.x=clamp(p.x,38,room.w-38); p.y=clamp(p.y,38,room.h-38); for(const o of room.obstacles) resolveCircleObstacle(p,o);
     if(sp>44 && !reduced() && room.particles.length<budget()) room.particles.push({kind:'trail',x:p.x-p.vx*.03,y:p.y-p.vy*.03,vx:-p.vx*.055,vy:-p.vy*.055,r:9+sp*.026,life:p.dashT>0?.13:.16,max:p.dashT>0?.13:.16,color:p.dashT>0?room.theme.c:room.theme.a});
     p.after.unshift({x:p.x,y:p.y,face:p.face,spin:dashSpinPhase(p),life:p.dashT>0?.13:.16}); if(p.after.length>(mobile?6:9)) p.after.pop(); for(let i=p.after.length-1;i>=0;i--){p.after[i].life-=dt; if(p.after[i].life<=0) p.after.splice(i,1);}
+    // Hazard zone effects
+    if(room.hazards) for(const hz of room.hazards){
+      const dx=(p.x-hz.x)/hz.rx, dy=(p.y-hz.y)/hz.ry;
+      if(dx*dx+dy*dy<1){
+        if(hz.type==='fog'){ p.vx*=0.6; p.vy*=0.6; }
+        else if(hz.type==='pulse'){ const on=Math.sin(performance.now()/1000*Math.PI+hz.phase)>0; if(on && p.inv<=0){ hurtPlayer(p,1,hz.x,hz.y); } }
+        else if(hz.type==='spore'){ p.pulse=Math.max(0,p.pulse-28*dt); }
+      }
+    }
     p.wasMoving=move.active; p.lastSpeed=sp;
   }
 
