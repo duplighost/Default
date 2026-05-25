@@ -198,7 +198,7 @@
   const state = {
     mode:'title', save:loadSave(), rng:Math.random, run:null, room:null,
     keys:Object.create(null), mouse:{x:0,y:0,down:false,seen:false},
-    input:{moveTouch:{id:null,startX:0,startY:0,x:0,y:0,dx:0,dy:0,len:0,maxLen:0,startT:0,dashLatch:false}, aimTouch:{id:null,startX:0,startY:0,x:0,y:0,dx:0,dy:0,len:0,maxLen:0,startT:0}},
+    input:{moveTouch:{id:null,startX:0,startY:0,x:0,y:0,dx:0,dy:0,len:0,maxLen:0,startT:0,dashLatch:false,prevLen:0,prevT:0,speed:0,dashed:false,lastAngle:null}, aimTouch:{id:null,startX:0,startY:0,x:0,y:0,dx:0,dy:0,len:0,maxLen:0,startT:0,prevLen:0,prevT:0,speed:0,dashed:false,dashLatch:false,lastAngle:null}, suppressUntil:0},
     muted:false, lastWhisper:'', oldMode:'title'
   };
   state.muted = !state.save.sound;
@@ -208,7 +208,7 @@
     hp:5,maxHp:5,shield:0,inv:0,hurt:0,
     speed:304,accel:24.5,stop:37.5,turn:30,lateral:13.5,
     fireDelay:.172,fireCd:0,damage:15,pulse:24,pulseGain:1,pulseRadius:305,
-    dashCdBase:.43,dashCd:0,dashT:0,dashDur:.165,dashSpinDir:1,dashTrail:0,
+    dashCdBase:.43,dashCd:0,dashT:0,dashDur:.295,dashSpinDir:1,dashTrail:0,lastDashAngle:null,lastDashAt:0,
     pickup:104,magnet:0,split:0,tipper:0,crit:.03,chain:0,cat:0,care:0,badges:0,song:0,
     bounce:0,haloDrain:0,
     shots:0,dashes:0,stillT:0,aimT:0,roomHit:false,wasMoving:false,brakeT:0,lastSpeed:0,after:[]
@@ -307,14 +307,20 @@
 
 
   // ---------- input: No Moon-style two thumbs anywhere ----------
-  function setPad(pad, touch){ pad.id=touch.identifier; pad.startX=touch.clientX; pad.startY=touch.clientY; pad.x=touch.clientX; pad.y=touch.clientY; pad.dx=pad.dy=0; pad.len=pad.maxLen=0; pad.startT=performance.now(); pad.dashLatch=false; }
+  function setPad(pad, touch){
+    const now=performance.now(); pad.id=touch.identifier; pad.startX=touch.clientX; pad.startY=touch.clientY; pad.x=touch.clientX; pad.y=touch.clientY;
+    pad.dx=pad.dy=0; pad.len=pad.maxLen=0; pad.prevLen=0; pad.startT=now; pad.prevT=now; pad.speed=0; pad.dashLatch=false; pad.dashed=false; pad.lastAngle=null;
+  }
   function updatePad(pad, touch){
+    const now=performance.now(), oldX=pad.x, oldY=pad.y, oldLen=pad.len||0;
     pad.x=touch.clientX; pad.y=touch.clientY;
+    const dt=Math.max(1, now-(pad.prevT||now)); pad.speed=Math.hypot(pad.x-oldX,pad.y-oldY)/dt*1000; pad.prevT=now; pad.prevLen=oldLen;
     const dx=(pad.x-pad.startX)/70, dy=(pad.y-pad.startY)/70, l=Math.hypot(dx,dy);
     pad.len=Math.min(1,l); pad.maxLen=Math.max(pad.maxLen,pad.len);
     if(l>1){ pad.dx=dx/l; pad.dy=dy/l; } else { pad.dx=dx; pad.dy=dy; }
+    if(pad.len>.08) pad.lastAngle=Math.atan2(pad.dy,pad.dx);
   }
-  function clearPad(pad){ pad.id=null; pad.dx=pad.dy=pad.len=0; pad.maxLen=0; }
+  function clearPad(pad){ pad.id=null; pad.dx=pad.dy=pad.len=0; pad.maxLen=0; pad.speed=0; pad.dashed=false; }
   function assignTouch(touch){
     const left = touch.clientX < W*.5;
     if(left){
@@ -341,13 +347,15 @@
   function releaseTouches(list){
     for(const t of list){
       if(t.identifier===state.input.aimTouch.id){
-        const pad=state.input.aimTouch;
-        const tap = performance.now()-pad.startT < 260 && pad.maxLen < .22;
-        if(tap) tryPulse();
+        const pad=state.input.aimTouch, age=performance.now()-pad.startT;
+        const tap = age < 260 && pad.maxLen < .22;
+        const flick = age < 230 && pad.maxLen > .82 && (pad.speed > 620 || pad.len > .86) && !pad.dashed;
+        if(flick) tryDash(pad.dx,pad.dy);
+        else if(tap) tryPulse();
         clearPad(pad);
       }
       if(t.identifier===state.input.moveTouch.id){
-        const pad=state.input.moveTouch, quick=performance.now()-pad.startT<240, flick=pad.maxLen>.70;
+        const pad=state.input.moveTouch, quick=performance.now()-pad.startT<230, flick=pad.maxLen>.80 && pad.speed>560;
         if(quick && flick && state.run?.player?.dashCd<=0) tryDash(pad.dx,pad.dy);
         clearPad(pad);
       }
@@ -431,9 +439,20 @@
     p.aimX=aim.x; p.aimY=aim.y; p.face=Math.atan2(p.aimY,p.aimX);
     if(aim.aiming) p.aimT += raw;
     if(aim.active && p.fireCd<=0) firePlayer(p, p.aimX, p.aimY);
-    const mpad=state.input.moveTouch;
-    if(mpad.id!==null && mpad.len>.86 && !mpad.dashLatch && p.dashCd<=0 && move.active){ tryDash(move.x,move.y); mpad.dashLatch=true; }
-    if(mpad.len<.48) mpad.dashLatch=false;
+    const mpad=state.input.moveTouch, apad=state.input.aimTouch;
+    if(performance.now()>=(state.input.suppressUntil||0) && mpad.id!==null && mpad.len>.80 && p.dashCd<=0 && move.active){
+      const a=Math.atan2(move.y,move.x);
+      const changed=p.lastDashAngle==null||Math.abs(angleDiff(a,p.lastDashAngle))>.38;
+      const newFromNeutral=(mpad.prevLen||0)<.55 && mpad.len>.82;
+      const newShove=mpad.speed>860||(mpad.speed>520 && mpad.len>(mpad.prevLen||0)+.11);
+      if((!mpad.dashLatch && (newFromNeutral||newShove))||changed||newShove){ tryDash(move.x,move.y); mpad.dashLatch=true; }
+    }
+    if(mpad.len<.56) mpad.dashLatch=false;
+    if(performance.now()>=(state.input.suppressUntil||0) && apad.id!==null && apad.len>.82 && p.dashCd<=0 && !apad.dashLatch){
+      const age=performance.now()-apad.startT;
+      if(age<230 && apad.speed>920){ tryDash(apad.dx,apad.dy); apad.dashLatch=true; apad.dashed=true; }
+    }
+    if(apad.len<.48) apad.dashLatch=false;
     updatePlayer(p,move,room,dt);
     updateEnemies(room,p,dt);
     updateBullets(room,p,dt);
@@ -489,7 +508,9 @@
   function tryDash(dx=null,dy=null){
     if(state.mode!=='play'||!state.run) return; const p=state.run.player; if(p.dashCd>0) return;
     if(dx==null){ const m=getMoveInput(); if(m.active){dx=m.x;dy=m.y;} else {dx=p.aimX;dy=p.aimY;} }
-    const n=norm(dx,dy); p.vx=n.x*1325; p.vy=n.y*1325; p.dashDur=.295; p.dashT=p.dashDur; p.dashSpinDir=(n.x*p.aimY-n.y*p.aimX)>=0?1:-1; p.inv=Math.max(p.inv,.36); p.dashCd=p.dashCdBase; p.dashes++;
+    const n=norm(dx,dy); if(n.m<.08) return;
+    const a=Math.atan2(n.y,n.x); p.lastDashAngle=a; p.lastDashAt=performance.now();
+    p.vx=n.x*1325; p.vy=n.y*1325; p.dashDur=.295; p.dashT=p.dashDur; p.dashSpinDir=(n.x*p.aimY-n.y*p.aimX)>=0?1:-1; p.inv=Math.max(p.inv,.36); p.dashCd=p.dashCdBase; p.dashes++;
     audio.hit('dash'); haptic(14); tactilePause(5); shake=Math.max(shake,.075);
     const room=state.room; for(let i=0;i<28;i++) particle(room,p.x-n.x*10,p.y-n.y*10,room.theme.c,rand(-n.x*420-90,-n.x*150+90),rand(-n.y*420-90,-n.y*150+90),.32,2+Math.random()*3.8);
     for(const e of room.enemies){ const d=dist(p.x,p.y,e.x,e.y); if(d<124+e.r+p.dashTrail*20){ const k=norm(e.x-p.x,e.y-p.y); damageEnemy(e,p.damage*(.55+.18*Math.max(1,p.dashTrail)),k.x*390,k.y*390,'dash'); } }
