@@ -683,7 +683,7 @@
 
   function startTransition(){
     const nextTheme = themes[(state.run.level) % themes.length];
-    transition.active=true; transition.timer=0; transition.text=nextTheme.name;
+    state.mode='transition'; transition.active=true; transition.timer=0; transition.text=nextTheme.name;
     transition.callback=()=>{ nextRoom(); state.mode='play'; };
   }
 
