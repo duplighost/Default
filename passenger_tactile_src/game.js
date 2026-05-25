@@ -211,7 +211,7 @@
     } else {
       nextRoom();
     }
-    whisper('two thumbs anywhere'); audio.ensure(); updateHUD(); saveNow();
+    audio.ensure(); updateHUD(); saveNow();
   }
 
   function nextRoom(){
@@ -511,7 +511,7 @@
 
   function tryPulse(){
     if(state.mode!=='play'||!state.run) return; const p=state.run.player;
-    if(p.pulse<100){ haptic(8); whisper('pulse hungry'); return; }
+    if(p.pulse<100){ haptic(8); return; }
     const room=state.room; p.pulse=0; flash=.75; slowMo=.42; shake=.42; tactilePause(38); audio.hit('pulse'); haptic(42);
     for(const b of room.bullets) if(b.owner==='enemy') b.life=Math.min(b.life,.08);
     for(const e of room.enemies.slice()){ const d=dist(p.x,p.y,e.x,e.y); if(d<p.pulseRadius+e.r){ const k=norm(e.x-p.x,e.y-p.y); damageEnemy(e,p.damage*(2.2+p.pulseGain*.5),k.x*420,k.y*420,'pulse'); } }
