@@ -639,7 +639,6 @@
   function damageEnemy(e,dmg,kx=0,ky=0,kind='hit'){
     if(e.hp<=0) return; e.hp-=dmg; e.vx+=kx; e.vy+=ky; e.hit=.11; e.stun=Math.max(e.stun,.032);
     const room=state.room; const pause = kind==='pulse'?30:kind==='dash'?18:kind==='chain'?16:10; tactilePause(pause); shake=Math.max(shake, kind==='pulse'?.16:kind==='dash'?.09:.035);
-    if(kind==='pulse' && room.floats.length<28) room.floats.push({x:e.x+rand(-6,6),y:e.y-e.r-8,text:'PULSE',life:.34,color:room.theme.c});
     for(let i=0;i<4 && room.particles.length<budget();i++) particle(room,e.x,e.y,kind==='pulse'?room.theme.c:e.color,rand(-90,90)+kx*.08,rand(-90,90)+ky*.08,.22,2+Math.random()*2.4);
     if(e.hp<=0) killEnemy(e);
   }
@@ -651,7 +650,6 @@
     const n=e.type==='boss'?24:(e.elite?8:3+Math.floor(Math.random()*3)); for(let i=0;i<n;i++) room.pickups.push({type:'spark',x:e.x+rand(-12,12),y:e.y+rand(-12,12),vx:rand(-120,120),vy:rand(-120,120),r:6,life:8,value:4});
     if((e.type==='boss'||Math.random()<.035) && p.hp<p.maxHp) room.pickups.push({type:'heart',x:e.x,y:e.y,vx:rand(-80,80),vy:rand(-80,80),r:11,life:8});
     for(let i=0;i<(e.type==='boss'?42:13) && room.particles.length<budget();i++) particle(room,e.x,e.y,e.color,rand(-170,170),rand(-170,170),.5,2+Math.random()*4);
-    if(Math.random()<.16) room.floats.push({x:e.x,y:e.y-40,text:pick(['NOPE','BONK','REFUND','LANE CLOSED','CART TAX','BAD IDEA'],state.rng),life:.46,color:room.theme.c});
     // Kill streak
     run.streak++; run.streakT=0.8;
     if(run.streak<streakNames.length && streakNames[run.streak]) room.floats.push({x:e.x,y:e.y-58,text:streakNames[run.streak],life:.72,color:room.theme.c,big:true});
