@@ -116,3 +116,17 @@
 ### Total patches this session: v285-v293 (9 patches)
 ### All verified in Playwright, all committed and pushed
 ### No regressions in the ending system (v275 hard-guard intact)
+
+### v294-v295 (continued):
+- v294: Deep debt source hardening (ChatGPT's v293 findings merged)
+  - v26 felt debt tickers killed (were computing per-frame for nothing)
+  - Lien spawn chance zeroed, undertow audio silenced
+  - Hallucination arrays emptied
+- v295: Boss kill flash positioned at constellation slot
+  - Each boss maps to its SLOTS position in the constellation
+  - Warden flash appears upper-left, Sun appears right, etc.
+  - Falls back to center if typeId isn't in the lookup table
+
+### Total patches: v285-v295 (11 patches)
+### Both Claude + ChatGPT findings merged
+### Game is stable, debt fully dead, constellation connects boss kills to ending
