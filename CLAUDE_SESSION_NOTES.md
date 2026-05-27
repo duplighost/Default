@@ -101,3 +101,18 @@
 
 ### Current build: v290 (v285+v286+v287+v288+v289+v290)
 ### All patches verified working together with zero regressions
+
+### v292-v293 (continued):
+- v292: Debt remnant cleanup (ChatGPT's catch)
+  - DEBT_COLLECTORS config disabled
+  - Debt collector enemies remapped to starThief
+  - "Moon Debt" / "DEBT KIOSK" / "Little Auditor" text cleaned from messages
+- v293: Boss kill constellation flash
+  - Screen dims briefly, star pulses at center-top
+  - "A STAR REMEMBERS" text fades over 2.2 seconds
+  - Connects boss kills to the ending constellation reveal
+  - One-time per kill, no persistent cost
+
+### Total patches this session: v285-v293 (9 patches)
+### All verified in Playwright, all committed and pushed
+### No regressions in the ending system (v275 hard-guard intact)
