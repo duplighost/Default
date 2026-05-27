@@ -84,3 +84,20 @@
   - Shows "Floor N • TIER" with color-coded icon
   - Blue circle (CALM), Gold triangle (RISING), Pink diamond (DEEP), Purple crescent (ABYSS)
   - Uses same glass panel style as the old debt chip
+
+### v290 (this session continued):
+- Dramatic constellation reveal: nebula glow, dense star field, enhanced craters
+- Screenshots captured at 30/50/65/80/95% reveal progress — looks like a real night sky
+- Full regression test: 8/8 PASS
+  - Game boots, starts, plays correctly
+  - All 5 patches (v285-v289) installed
+  - Moon Debt stays 0
+  - No auto-reveal on fresh game (v275 hard-guard intact)
+  - Reveal renders correctly when triggered
+  - Game resets cleanly after reveal
+  - Mobile: 29ms avg frame timing
+- spawnDebtAmbush confirmed independent of moonDebt (uses level.index)
+- No remaining Moon Debt dependencies that could break gameplay
+
+### Current build: v290 (v285+v286+v287+v288+v289+v290)
+### All patches verified working together with zero regressions
