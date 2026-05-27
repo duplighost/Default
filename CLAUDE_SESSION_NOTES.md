@@ -73,3 +73,14 @@
 - Biome-specific obstacle visual styling
 - Constellation dramatic enhancement for ending reveal
 - Consider floor-based difficulty properties to replace debt's "accumulating pressure"
+
+### v288 + v289 (continued):
+- v288: Floor-scaled species effects (calm/rising/deep/abyss tiers)
+  - Species obstacle HP scales with floor (+0.5 per floor)
+  - BlackGlass shrapnel count increases on deeper floors
+  - Ambush enemies spawn pre-awakened on floor 6+
+  - FalseIdol gets double ambush chance on floor 9
+- v289: Replaced "Moon Debt 0" HUD chip with floor tier indicator
+  - Shows "Floor N • TIER" with color-coded icon
+  - Blue circle (CALM), Gold triangle (RISING), Pink diamond (DEEP), Purple crescent (ABYSS)
+  - Uses same glass panel style as the old debt chip
