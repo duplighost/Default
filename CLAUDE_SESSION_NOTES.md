@@ -61,3 +61,15 @@
 - Smoke test harness at /tmp/smoke-test.js
 - HTTP server for local testing: `cd /tmp/chatgpt-v280 && python3 -m http.server 8888`
 - Screenshots saved to /tmp/screenshots/
+
+### v287 (this session continued):
+- Unmuzzled species obstacle gameplay effects on mobile
+- v243's cosmetic muzzle (sparks/rings/shake/scars) stays active
+- Gameplay effects (pulse hazards, fog zones, lane hazards, shrapnel) now replay after v243's muzzle
+- Mobile frame timing: 32ms avg (no regression from unmuzzle)
+- Species obstacles now have teeth on mobile instead of being empty loot containers
+
+### Next up:
+- Biome-specific obstacle visual styling
+- Constellation dramatic enhancement for ending reveal
+- Consider floor-based difficulty properties to replace debt's "accumulating pressure"
