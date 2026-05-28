@@ -275,3 +275,35 @@ enemies through createEnemy; real RAF loop runs the real updateBullets).
   moonBear gets the 1.75s intro cap but crescentBear and lunarCub do NOT (their
   names lack "moon"/"sun"). Cosmetic/balance only; touching the regex risks the
   real sun/moon BOSSES. Left for user decision.
+
+### v299 = REAL BUG FIXED: hidden draft panel was eating clicks (CSS-only)
+Found while hunting the ending/restart soft-lock surface (user: "really trying
+to squash bad bugs", restart has historically "glitched a million ways").
+- ROOT CAUSE: #draftUI is pointer-events:none even when SHOWN (so stray clicks
+  fall through to the canvas); only .draftPanel re-enables pointer-events:auto so
+  the panel is clickable. But #draftUI.hidden only fades the panel (opacity:0 +
+  translateY) — NOT display:none — and .draftPanel's auto wasn't conditioned on
+  visibility. So a hidden draft left an INVISIBLE, full-width ~76px band at the
+  bottom of the screen (measured 1120x76 at y646–722 on 1280x720) that still
+  captured clicks. elementFromPoint at the band center returned the panel, not
+  the canvas. On short/landscape viewports the overlay's start/restart button can
+  fall into that band → "can't click restart" class of soft-lock.
+- Why death->restart still passed 5/5: on desktop the dead/title start button
+  sits above the band, and renderDraftUI clears the CARDS when inactive (only the
+  title/hint keep the band ~76px tall). The hazard is viewport/position-dependent
+  — exactly the kind that hits mobile and not desktop.
+- FIX (no-moon/index.html <style>, ONE rule): `#draftUI.hidden .draftPanel {
+  pointer-events: none; }`. CSS-only; touches nothing in the 3 JS copies.
+- VERIFIED (Playwright, real file): hidden-panel computed pointer-events now
+  'none', elementFromPoint returns CANVAS (passes through); ACTIVE draft panel
+  still pointer-events:auto (cards still clickable — fix only targets .hidden).
+  .panel/.card/.codexPanel never set pointer-events:auto, so #overlay.hidden and
+  .codexOverlay.hidden DON'T leak — .draftPanel was the unique offender.
+- Regression 11/0; death->restart hammer still 5/5, zero page errors.
+- JS invariant intact: root index_script.js == no-moon/game_inline.js == inline
+  <script> in no-moon/index.html (all 3,452,719 bytes inline / 3,463,273 file).
+- ASIDE (verified, NOT a bug): mashing the start button during the moon reveal
+  cancels it — that's the v251 startGame wrap resetting reveal state for a fresh
+  run (correct anti-soft-lock). And a forced/illegitimate reveal is bounced back
+  to title by the v250/v259/v265 win-legitimacy guards (good).
+- Build: qualiacology-no-moon-v299-draft-panel-clickthrough.zip
