@@ -180,3 +180,29 @@ Hunted the pre-v285 stack + the ending system. Findings:
 
 ### v298 final = v297 + drawHUD finally-restore + shrapnel cap + re-entry soft-lock recovery
 ### 13/13 regression. The restart path is now bulletproof even if startGame throws.
+
+### Deep hunt round 3 (v298 + landscape HUD overlap):
+- REAL BUG FIXED: "UI pops up over the top-left" (user-reported). The LIVE message
+  renderer is drawMessages59 (v59 replaced base drawMessages with an empty stub —
+  my earlier base-drawMessages clamp was on a DEAD function). drawMessages59 keys
+  its top-safe zone off `W < 720` as a proxy for "mobile/short," but a LANDSCAPE
+  phone is wide (W>=720) yet short (H~414), so it got the desktop offset
+  (majorStartY=78) while the desktop chip reaches ~88px → messages overlapped the
+  top-left chip. Fixed: majorStartY now floors at the REAL chip bottom
+  (gameplayUiLayout().topChip.y+h) + 10, independent of width. Verified via
+  landscape (760x414) screenshot — chip is now clear.
+- FALSE ALARM (agent #1, NOT fixed): "ensureCareer doesn't init defeatedBosses →
+  Vesper/Nadir re-lock." Traced: vesperUnlockSource71 default-args call
+  readSave71()/readMirror71() which run `defeatedBosses = obj71(...)` before any
+  read (lines 41123/41132). Every reader/writer inits it locally. Not a bug.
+- ALREADY-MITIGATED (agent #4, NOT fixed): "First Walker trophy draft no final-
+  level guard → blocks ending." offerTrophyDraft checks `mode !== 'play'`, so once
+  the ending sets mode='win' the draft is blocked. First Walker isn't the final
+  boss (Drowned Sun is, dies after). Adding the levelIndex guard would risk
+  removing a legit Broken Tether trophy. Left alone.
+- LOW-PRI noted, not fixed: draft invuln asymmetry (game frozen during draft),
+  reroll-empty soft-lock (28-item pool, ~never empty), null charId (falls back to
+  CHARACTERS[0]). Not worth the churn/risk.
+
+### v298 final = v297 + drawHUD finally-restore + re-entry soft-lock recovery
+###   + shrapnel bullet-cap + landscape message-overlap fix. 13/13 regression.
