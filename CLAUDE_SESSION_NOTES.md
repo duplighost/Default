@@ -307,3 +307,24 @@ to squash bad bugs", restart has historically "glitched a million ways").
   run (correct anti-soft-lock). And a forced/illegitimate reveal is bounced back
   to title by the v250/v259/v265 win-legitimacy guards (good).
 - Build: qualiacology-no-moon-v299-draft-panel-clickthrough.zip
+
+### Click-eater SWEEP after v299 (overlay/HUD pointer-event audit) — CLEAN
+Systematic hunt for SIBLINGS of the draft-panel bug. Method (Playwright):
+(1) grid hit-test the whole screen (18px step) and flag any point where the
+TOPMOST element is effectively invisible (opacity ~0 through self+ancestors) yet
+still capturing clicks; (2) for every effectively-visible key button, assert it
+is the topmost element at its own center.
+Viewports: 1280x720, 390x844, 844x390, 760x414. States: TITLE, PLAY/DRAFT, DEAD,
+CODEX.
+RESULT:
+- invisible-click-eaters = 0 in ALL states/viewports. The draft panel had NO
+  siblings; v299 closed the only one of its kind. (.panel/.card/.codexPanel never
+  set pointer-events:auto, so #overlay.hidden and .codexOverlay.hidden don't leak.)
+- TITLE / PLAY / DEAD: blockedButtons = 0 everywhere — start/restart, codex, and
+  audio toggles are all hittable.
+- CODEX: startBtn/codexBtn/toggles are covered by the VISIBLE Field Guide panel —
+  correct modal behavior, not a bug. codexClose is never blocked, and a dedicated
+  test confirmed open->close(X)->startBtn-hittable PASSES on all 3 viewports (no
+  modal soft-lock; you can always escape the Field Guide back to a restartable
+  state).
+No code change from this sweep — nothing to fix. v299 remains the current build.
