@@ -223,3 +223,55 @@ Hunted the pre-v285 stack + the ending system. Findings:
 ### v298 final fixes (all verified): drawHUD finally-restore, re-entry soft-lock
 ###   recovery, shrapnel bullet-cap, landscape message overlap, in-game gear restore.
 ### 13/13 regression. Build: qualiacology-no-moon-v298-ingame-gear-and-hud-fixes.zip
+
+### AUDIO SYSTEM AUDIT (read-only, no edits) — VERDICT: HEALTHY
+- BGM and SFX have SEPARATE output chains: BGM osc→BGM limiter→ctx.destination
+  (~1715); SFX osc→audioState.master→ctx.destination (~1833/1855/1792). They
+  never share a gain node, so muting SFX cannot kill BGM (no shared-gain bug).
+- startProceduralBgm calls stopProceduralBgm() first (~1690) → no double-start
+  oscillator-stack leak on rapid toggles / re-entry.
+- Live Chromium toggle test: SFX label ON↔OFF, localStorage noMoonSfxMute_v1
+  round-trips "1"/"0" and survives reload; BGM label ON↔OFF. All correct.
+- Only real audio-related issue was the in-game gear visibility — already fixed
+  in v298 above. Audio system needs no code changes.
+
+### COMBAT / COLLISION CORE AUDIT (read-only, no edits) — VERDICT: CORRECT
+Live runtime tests via Playwright (state on window; noMoonSpawnBear spawns real
+enemies through createEnemy; real RAF loop runs the real updateBullets).
+- updateBullets (line 5287, NOT wrapped — single source of truth) sub-steps by
+  speed (steps = ceil(speed*dt/18)) = continuous collision detection → no
+  tunneling of fast bullets through thin enemies/obstacles. VERIFIED.
+- Player→enemy: collision (hypot < e.r+b.r) detected; damageEnemy applies FULL
+  bullet damage; killEnemy increments stats.kills and sets enemy.remove.
+  Window-closed test: dmg-50 bullet → exactly 50 hp lost; dmg-200 → kill+kills++.
+  VERIFIED.
+- Enemy→player: collision detected; damagePlayer (live = v-polish reimpl at
+  10773) applies i-frames (hitInvuln 0.36 absorbed / 0.52 hit). Two overlapping
+  enemy bullets in one invuln window = exactly ONE hit (2nd blocked). VERIFIED.
+- Wall: bullet outside world removed (or reflected if bounces>0). VERIFIED.
+- Obstacle: bulletHitsObstacle stops player bullets before the enemy check
+  (obstacle correctly shields an enemy behind it). VERIFIED.
+- damagePlayer wrap chain (10773 full reimpl → 15318/15572/33549/34538/36133/
+  38708/43513/52991 wraps via __futureBase etc.) preserves shield→hp→death and
+  i-frames. No behavior lost. damageEnemy/killEnemy wraps pass `amount` through
+  (no wrap reassigns amount).
+- RED HERRING EXPLAINED: a dmg-50 bullet appeared to do only 28 (and 0.32032 with
+  natural maxHp 11.44). Cause = v64 "boss first-breath" anti-burst cap
+  (damageEnemyV64 @ 39487): for isBossLike64 enemies, during a 1.75s game-time
+  intro window, per-hit damage is capped at max(0.12, maxHp*0.028) with a total
+  budget maxHp*0.18. 1000*0.028=28; 11.44*0.028=0.32032 (exact). Gated entirely
+  behind `if (enemy && isBossLike64(enemy))` — NORMAL enemies skip the block and
+  always take full damage. Working as designed. (state.time runs ~half real-time
+  in headless due to dt-clamping, so the window is hard to wait out in tests; set
+  introDamageUntil=0 to confirm full damage lands — it does.)
+- PERFORMANCE (mobile 390x844): baseline p50 33.4ms is pure headless software-GL
+  render overhead; 80 realistic flying enemy bullets add only ~0.92ms/frame
+  (p50 identical). Collision/bullet update is ~0.01ms/bullet — NOT a mobile
+  concern. (The earlier scary 44ms was a self-inflicted 120-bouncing-bullet
+  spawnSpark storm — bounces is a player-bullet trait; enemy bullets don't bounce
+  in real play.)
+- MINOR INCONSISTENCY noted, NOT fixed (needs user call — fragile boss code):
+  isBossLike64 regex /…|sun|moon|…|boss/ matches the "moon" substring, so
+  moonBear gets the 1.75s intro cap but crescentBear and lunarCub do NOT (their
+  names lack "moon"/"sun"). Cosmetic/balance only; touching the regex risks the
+  real sun/moon BOSSES. Left for user decision.
