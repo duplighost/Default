@@ -130,3 +130,27 @@
 ### Total patches: v285-v295 (11 patches)
 ### Both Claude + ChatGPT findings merged
 ### Game is stable, debt fully dead, constellation connects boss kills to ending
+
+### Deep dive on v296 + v298 fix (this session):
+Audited the full v285-v296 patch stack. Findings:
+- REAL BUG (fixed in v298): v289 drawHUD wrapped ctx.save()/restore() with restore
+  INSIDE the try block. A thrown draw call would skip restore and leak a canvas
+  save-stack entry every frame. Fixed by moving restore into a finally.
+- ALREADY FIXED in v297 (ChatGPT): LIEN_SPAWN_CHANCE was set to 0, but code used
+  `chance || 0.35` so 0 (falsy) fell through to 0.35 — liens still spawned. v297
+  sets it to -1 (truthy) so Math.random() >= -1 always exits. Verified lien=-1.
+- AGENT WAS WRONG: claimed ENEMY_TYPES might be out of scope for v292's remap.
+  Verified ENEMY_TYPES is const at line 1024 inside the outer IIFE, reachable
+  by all install blocks. The starThief remap works.
+- MINOR (not fixed, balance only): v288 double floor-scales species HP because
+  the base convertObstacleToSpecies already scales with level.index*0.28. Net
+  effect: species obstacles slightly tankier on deep floors. Not breakage.
+- KNOWN/ACCEPTED: forward flag-propagation gaps in v286/v289/v293 wraps. Not a
+  current bug (each install block has a state.__vNNNInstalled top guard). Matters
+  only if a FUTURE patch wraps the same function and checks another patch's flag.
+  Documented for future patch authors.
+- COSMETIC: in-game build banner reads v297 because v297 re-asserts its tag every
+  frame. v298's actual fix is confirmed via noMoonV298Debug().
+
+### v298 = v297 (ChatGPT lien fix + all v285-v296) + drawHUD canvas-safety fix
+### 13/13 regression tests pass. Live baseline.
