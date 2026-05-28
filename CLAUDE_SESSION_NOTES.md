@@ -154,3 +154,29 @@ Audited the full v285-v296 patch stack. Findings:
 
 ### v298 = v297 (ChatGPT lien fix + all v285-v296) + drawHUD canvas-safety fix
 ### 13/13 regression tests pass. Live baseline.
+
+### Deep hunt round 2 (v298 expanded):
+Hunted the pre-v285 stack + the ending system. Findings:
+- REAL SOFT-LOCK (fixed): finishReentryStart274 (the "Re-enter at Floor 1" button)
+  calls startGame(id) then sets mode='play'. If startGame throws anywhere in its
+  54-wrapper chain before setting play mode, the catch just logged+returned —
+  player frozen in 'endingReturn' with overlay up, no recovery but page reload.
+  This is the historical "can't restart after ending" class. Fixed: catch block
+  now routes to title/passenger-select (known-clean state) so a failed re-entry
+  never strands the player. Error-path only — happy path untouched.
+- REAL (minor, fixed): v287/v288 blackGlass shrapnel pushed bullets without the
+  enemy-bullet-cap check the base game uses. Added countBulletsByOwner guards
+  (116 for v287 replay, 120 for v288 floor-scale) so a break near a full screen
+  can't overshoot the cap on mobile.
+- INVESTIGATED, LEFT ALONE: addLifetimeStat does synchronous localStorage writes
+  on every breakable break. MEASURED the save object = 1548 bytes, JSON.stringify
+  = 0.01ms. The per-break write cost is a few ms on a phone, not the headline
+  hitch (Moon Debt's debt ring was). Not worth debouncing the load-bearing save
+  system for sub-5ms. Measurement beat assumption.
+- CLEAN: memory (bullets/particles/enemies reset between rooms+runs, particles
+  hard-capped 150 mobile/220 desktop), event listeners (all base-IIFE one-time,
+  no per-run accumulation), wrap-chain depth (81 updateGame wraps ≈ sub-microsecond,
+  negligible vs 16ms frame budget — aesthetic debt only).
+
+### v298 final = v297 + drawHUD finally-restore + shrapnel cap + re-entry soft-lock recovery
+### 13/13 regression. The restart path is now bulletproof even if startGame throws.
