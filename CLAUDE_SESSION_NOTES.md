@@ -206,3 +206,20 @@ Hunted the pre-v285 stack + the ending system. Findings:
 
 ### v298 final = v297 + drawHUD finally-restore + re-entry soft-lock recovery
 ###   + shrapnel bullet-cap + landscape message-overlap fix. 13/13 regression.
+
+### Deep hunt round 4 (in-game gear / sound toggles) — USER-REPORTED:
+- REAL BUG FIXED: in-game SFX/BGM toggles gone on PC. The ⚙ gear button
+  (hudMenuBtn) opens the audio menu during play. v273's syncTitleControls sets
+  hudMenuBtn.style.display='none' on the TITLE (shows toggles directly there
+  instead) — but NOTHING ever restored display when entering gameplay. The
+  gameplay sync only set opacity/pointerEvents, which CANNOT override
+  display:none. So after seeing the title once, the gear stayed display:none
+  for the whole session → no in-game sound toggles. Fixed: live
+  syncGameplayDomButtons now sets hudMenuBtn.style.display='' in the play branch
+  (and 'none' in the overlay branch, matching v273). Verified: title gear
+  display:none/opacity:0 (hidden), play gear display:block/opacity:0.94
+  (visible), gear-click reveals SFX+BGM toggles at opacity:0.96.
+
+### v298 final fixes (all verified): drawHUD finally-restore, re-entry soft-lock
+###   recovery, shrapnel bullet-cap, landscape message overlap, in-game gear restore.
+### 13/13 regression. Build: qualiacology-no-moon-v298-ingame-gear-and-hud-fixes.zip
