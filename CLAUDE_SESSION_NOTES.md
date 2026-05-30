@@ -380,3 +380,57 @@ VERIFIED (Playwright, real inline build):
 - Regression 11/0. 3 JS copies (game_inline.js / index_script.js / inline <script>)
   byte-identical-in-logic and synced.
 - Build: qualiacology-no-moon-v300-spiggot-carries-sunkey.zip (also carries v299 CSS).
+
+### v301 — TRUE root-cause fix for the Spiggot sunkey bug (user critique honored)
+USER CRITIQUE on v300: "so the player will eliminate the spiggot now. and they'll
+be confused. and it will feel bad. because there is no pickup. because the root
+cause wasn't found?" — VALID. v300 bypassed the bug by granting on death and
+removing the pickup, which fixed the gate but degraded UX (no visible drop) and
+didn't actually identify/fix the root cause.
+
+ACTUAL ROOT CAUSE (identified via side-by-side moonkey vs sunkey comparison):
+- spawnSunkey43 had a once-per-run lockout: `if (state._v43SunkeyDroppedThisRun
+  || sunkeyCount43() >= 1) return false;`
+- The first Spiggot kill set _v43SunkeyDroppedThisRun=true. EVERY subsequent
+  Spiggot was silently blocked from dropping another. If the first pickup was
+  missed/lost (room transition, despawn, the pull-out/re-add fragility in v43's
+  updatePickups wrap), the rest of the run was permanently denied a sunkey ->
+  the Moon-Shrine route gate failed -> player got the no-keys Moon ending.
+- This perfectly explains user's "multiple Spiggots, no key" memory: not random
+  failure, but a silent single-point-of-failure with no second chance.
+- Moonkeys (v30) don't have this lockout: planned trials seed ~4 False Moon
+  rooms across floors 2-8, each can drop a moonkey (per-room cap is 1, but
+  multiple rooms = multiple chances) until count hits MOONKEYS_FOR_ALT (3).
+  Architecturally robust by accident; missing one moonkey doesn't doom the run.
+
+V301 FIX:
+1. spawnSunkey43 (~game_inline.js:28935): removed the _v43SunkeyDroppedThisRun
+   check. The collected-count guard (sunkeyCount43() >= 1) remains, so the
+   pickup still stops spawning once the player actually has one. Multiple
+   Spiggots each get a chance to drop while the count is still 0 — just like
+   multiple False Moons each get a chance to drop a moonkey.
+2. v43 killEnemy wrap (~game_inline.js:29521): restored the spawnSunkey43 call
+   (the player sees the pickup again — fixes v300's UX regression), AND kept a
+   silent count-grant on death as defense-in-depth (no message/flash; the
+   pickup ceremony is the player-facing feedback). The safety net stays
+   invisible unless the pickup is lost for some other reason.
+
+VERIFIED (Playwright, real inline build):
+- TEST 1: Spiggot kill -> visible pickup in state.pickups AND silent count
+  grant. PASS.
+- TEST 2: With _v43SunkeyDroppedThisRun=true (lockout flag set), pickup STILL
+  drops (proving lockout removal). PASS.
+- TEST 3: With count already 1, no extra pickup spawns (proving count guard
+  intact). PASS.
+- Stomp-timeline: shrine handoff with both keys -> sun path survives, no v250
+  stomp. PASS (same as v300).
+- 11/0 regression.
+- Three JS copies in sync (root index_script.js == no-moon/game_inline.js ==
+  inline <script> in no-moon/index.html).
+
+Did NOT fix: the pull-out/re-add fragility in v43's updatePickups wrap (line
+29550-29569). It's a real fragility but only matters if baseUpdatePickups
+throws, and the silent death-grant covers that edge case anyway.
+
+Build: qualiacology-no-moon-v301-spiggot-lockout-root-fix.zip (also includes
+v299 draft-panel CSS fix).
