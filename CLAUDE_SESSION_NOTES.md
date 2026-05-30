@@ -328,3 +328,55 @@ RESULT:
   modal soft-lock; you can always escape the Field Guide back to a restartable
   state).
 No code change from this sweep — nothing to fix. v299 remains the current build.
+
+### v300 — Spiggot carries the Sunkey (fixes "moon ends instead of Sun path")
+USER REPORT: beat Null Archon -> moon shrine -> Boon Moots -> crack moon -> got the
+final Moon zoom-out (restart-only) instead of being teleported to the sunny biome.
+User (dev) clarified the design across several messages:
+- Null Archon is NOT the final boss. After it: dark moon room -> shoot moon -> Boon
+  Moots -> SHOULD route to the sunny biome (Sun path).
+- That route is GATED: needs 3 moonkeys (drop from False Moons) + 1 sunkey (drops
+  from Spiggot). Without them the run ENDS at the moon — this is INTENDED.
+- The old "beat the first Sun twice to open the path" was ditched; beating the Sun
+  once now -> win (completeSunVictory39, single clear). Confirmed in code.
+- Build under test = exactly my shipped v298 (user uploaded their live deploy zip;
+  cmp: DEPLOYED == v298 shipped). So diagnosis/fix target the exact running code.
+
+CHATGPT THEORY (v250 shrine-done stomp) — VERIFIED FALSE for this build:
+- Claim: enterMoonPathFloor39 sets overlayMode='title' + calls hideOverlay() while
+  shrine.stage==='done'; v250's hideOverlay->enforce->repairFinalWinOverlay reads
+  finalWinEvidence (shrineDone = stage==='done' && !active) and stomps mode back to
+  'win', then v251 arms the reveal. (v250 DOES have updateGame+hideOverlay enforce.)
+- LIVE TEST (stomp-timeline.js, frame-by-frame, both keys granted, real handoff via
+  shrine.stage='done' -> commitRunSummary('win') -> showOverlay('win') -> v39
+  redirect -> beginMoonPath39 -> enterMoonPathFloor39 -> hideOverlay): at f0 the sun
+  route SURVIVES (mode=play, overlayMode=play, moonPath=true, lvl=10) and shrine
+  resets to 'fight'. NO stomp, no reveal armed, no _v250FinalWinLocked.
+- ROOT of why it doesn't stomp: v275 neutralizeShrine275() resets an inactive shrine
+  from done/ascend/victory -> 'fight' (per-frame when mode/overlayMode is 'title',
+  and on showOverlay('title')). v275 installs AFTER v250, so the residue is cleared
+  before v250 can use it. ChatGPT later CONCEDED ("static trace lost to runtime").
+- Both static traces (ChatGPT's AND mine) predicted a stomp; the live test disproved
+  it. Lesson: in this 80-wrapper file, runtime test > static trace.
+
+ACTUAL ROOT (converged with ChatGPT's 2nd pass): the SUNKEY wasn't in the gate count
+at the shrine moment. The v43 killEnemy wrap did `spawnSunkey43(...)` = drop a PICKUP
+you must walk over; the gate checks sunkeyCount43() >= 1 (collected count). If the
+pickup despawned / landed out of reach / room was left before collecting, the gate
+failed -> final Moon ending. (The "THE LOCK NEEDS THE SUNKEY" warning is also fragile
+— overwritten by the v251 reveal text — so not seeing it isn't decisive.)
+
+FIX (v300, per user "they should be carrying it, no special notation"): in the v43
+killEnemy wrap (~game_inline.js:29522) the Spiggot now AWARDS the sunkey directly on
+death: setSunkeyCount43(max(1, sunkeyCount43())) + _v43SunkeyDroppedThisRun=true +
+'SUNKEY TAKEN' message + flourish (no missable collectible). Did NOT touch the
+shrine/reveal/ending (no-keys moon ending is intended; the stomp theory was false).
+
+VERIFIED (Playwright, real inline build):
+- Spiggot kill -> state.sunkeys 0->1, enemy removed. PASS.
+- E2E: kill Spiggot (grants sunkey) + 3 moonkeys -> shrine handoff -> SUN PATH
+  (moonPath=true, mode=play, lvl=10). PASS.
+- 4-combo gate still correct: only (3 moonkeys & 1 sunkey) opens the path. PASS.
+- Regression 11/0. 3 JS copies (game_inline.js / index_script.js / inline <script>)
+  byte-identical-in-logic and synced.
+- Build: qualiacology-no-moon-v300-spiggot-carries-sunkey.zip (also carries v299 CSS).
