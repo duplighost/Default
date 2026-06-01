@@ -508,3 +508,43 @@ no-keys byte-identical pre/post; regression 11/0; 3 JS copies synced.
 LIMITATION (honest): still cannot reproduce the user's device timing in headless;
 fix is targeted at the reproduced mechanism + made race-independent, not confirmed
 against the user's actual run. Build: qualiacology-no-moon-v303-sun-route-stomp-fix-hardened.zip
+
+### v304 — visible buildTag + reveal-cascade clear at route-start
+TWO things in this build:
+
+(1) BUILDTAG VERIFICATION: ChatGPT correctly observed that v302/v303 left
+state.buildTag still reading 'qual.v298-...' because v297's setInterval re-asserted
+its own tag every 350ms, and my prior fixes were in-place edits to existing
+functions (no new tag assignment). Fixed via Object.defineProperty(state,
+'buildTag') with a getter that always returns v304.version, plus a MutationObserver
+on #buildTagDisplay so v297's setInterval can keep writing but our value always
+wins. Anyone can now verify v304 is live by checking state.buildTag,
+window.noMoonCurrentBuild(), the #buildTagDisplay element, or
+document.documentElement.dataset.noMoonBuild — all four agree (verified).
+
+(2) THE ACTUAL FIX (in v39's enterMoonPathFloor39, alongside v303's shrine clear):
+clears EVERY reveal-arming flag the shrine handoff may have set:
+  state._v251RevealPromptArmed = false;
+  state._v250FinalWinLocked = false;
+  state._v260EndingAutoArmedAt = 0;
+  state._v260EndingAutoStarted = false;
+  state._v257AutoArmedAt = 0;
+  state.__v252WinSeen = false;
+  state._v251Reveal.armed = false; state._v251Reveal.active = false;
+Reason: armRevealPrompt() sets a cascade (reveal.armed + _v251RevealPromptArmed +
+mode='win' + overlayMode='win' + _v250FinalWinLocked) when v251's per-frame
+update tick sees finalWinState() true. That tick fires during the brief
+mode='win' window in the shrine handoff. v303 cleared the shrine flag and
+guarded finalWinEvidence, but those armed flags were left intact — and v260's
+maybeAutoStartReveal (called every frame from updateGame) sees revealPromptArmed
++ finalWinLike both true after the handoff, waits 220ms, then fires beginReveal.
+That's the exact "showed the next biome for a second, then the zoom-out" symptom.
+
+HONEST LIMITATION: my synthetic tests now pass on BOTH v303 and v304 because
+whatever bypass happens on the user's device, my Playwright headless environment
+hits the cleanup race differently — my pre-armed flags get wiped between
+page.evaluate and the very first requestAnimationFrame tick. So I can't show
+v303 STOMPING and v304 NOT in a real-flow test. The fix is defensive against
+the inferred mechanism, not confirmed against the user's specific timing.
+
+Build: qualiacology-no-moon-v304-reveal-cascade-clear-and-buildtag.zip
