@@ -434,3 +434,50 @@ throws, and the silent death-grant covers that edge case anyway.
 
 Build: qualiacology-no-moon-v301-spiggot-lockout-root-fix.zip (also includes
 v299 draft-panel CSS fix).
+
+### v302 — THE REAL stomp fix (sun route overwritten by moon ending) — ChatGPT was right
+USER (real playthrough, had keys): "when I hit the boon moots, it showed it for maybe
+a second of the next biome. but then the ending with the zoom out ... made me restart
+from beginning as if it was the real ending. same glitch we dealt with before."
+
+This finally reproduced the bug I'd been failing to catch. The Sun route DOES start
+(player sees the next biome ~1s), then the moon zoomout STOMPS it. This is exactly
+ChatGPT's v250 theory — which my earlier synthetic tests wrongly dismissed because
+they reset the shrine too early to ever hit it.
+
+ROOT (reproduced live, repro-stomp.js): once the Sun route is live (mode=play,
+_v39MoonPathActive=true, overlayMode=play), the shrine residue (stage='done',
+!active) is STILL present — v275 neutralizeShrine275 only fires while mode/
+overlayMode is 'title', so once the Sun biome loads (overlayMode='play') it stops
+firing and the residue persists. The v250 updateGame enforce (per-frame) then reads
+finalWinEvidence() -> shrineDone=true -> repairFinalWinOverlay() stomps mode='win',
+sets _v250FinalWinLocked, and v251 arms the moon reveal. Reproduced frame-by-frame:
+f0 mode->win, winLocked->true, revealArmed->true; f1 revealActive->true.
+
+Why my v300/v301 synthetic tests passed: I set shrine.stage='done' and triggered the
+handoff in one shot; neutralizeShrine275 won the race in that timing and reset the
+shrine to 'fight' before any enforce. The REAL flow (moon kill -> Boon Moots ->
+ascension -> done -> live Sun biome with overlayMode='play') keeps the residue alive
+past the neutralize window. Lesson (again): runtime repro > synthetic gate test.
+
+FIX (game_inline.js): guard BOTH win-evidence readers so a finished shrine is NOT
+treated as final-win evidence while the Sun route is live:
+  finalWinEvidence()  (v250, ~59616): shrineDone = ... && !state._v39MoonPathActive
+  anyFinalWinEvidence() (v251 recovery, ~60641): same && !state._v39MoonPathActive
+The legit Sun-route WIN uses a separate flag (_v39SunPathCompletedThisWin, set only
+after the Sun is actually beaten and which sets _v39MoonPathActive=false), so the
+guard does NOT suppress the real ending. The no-keys moon ending fires via
+explicitWin (mode='win' set by the handoff), not shrineDone, so it's unaffected.
+
+VERIFIED:
+- repro-stomp.js: BEFORE fix = STOMP REPRODUCED; AFTER fix = no stomp (sun route
+  survives, mode=play, moonPath=true, no winLocked/reveal).
+- verify-fix.js with-keys: route survives even when residue is re-asserted 6x over
+  90 frames. PASS.
+- no-keys handoff: byte-identical behavior v301-pre-fix vs fixed (mode=play, no win
+  evidence in the synthetic harness) -> fix is a provable no-op for no-keys.
+- Regression 11/0. Three JS copies synced.
+- Did NOT touch shrine/reveal/route code; minimal 2-line-condition guard only.
+
+Build: qualiacology-no-moon-v302-sun-route-stomp-fix.zip (carries v299 CSS + v301
+sunkey lockout fix too).
