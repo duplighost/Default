@@ -481,3 +481,30 @@ VERIFIED:
 
 Build: qualiacology-no-moon-v302-sun-route-stomp-fix.zip (carries v299 CSS + v301
 sunkey lockout fix too).
+
+### v303 — harden the sun-route stomp fix (race-independent)
+After v302 I tried to repro on the REAL flow (drive the actual shrine reward ->
+capture -> ascend -> handoff). It HELD on BOTH v301 and v302 — because in headless
+the neutralizeShrine275 'title'-frame race resolves in the game's favor, so the
+residue is cleared and the stomp never fires. On the user's device the race
+resolves the OTHER way (residue persists) and it stomps. I cannot reproduce that
+timing in headless. The only reliable repro is the FORCED-residue test (shrine=done
+while route live + overlayMode=play): there v302's guards turn STOMP->no-stomp.
+
+So v302's finalWinEvidence guards are correct but depend on me having found every
+win-evidence reader. v303 removes that dependency: enterMoonPathFloor39 now clears
+the shrine residue SYNCHRONOUSLY at route-start (stage='fight', active=false,
+reward=null) — the same reset neutralizeShrine275 does, but at the moment the route
+begins instead of on a later 'title' frame it might miss. So no reader (found or
+unfound) can see stage==='done' once the Sun route is live, regardless of timing.
+
+Two independent protections now: (1) residue cleared at source; (2) finalWinEvidence/
+anyFinalWinEvidence ignore shrine-done while _v39MoonPathActive (v302). The real
+sun-completion win uses _v39SunPathCompletedThisWin (sets _v39MoonPathActive=false)
+and the no-keys moon ending uses explicitWin (mode='win'), so neither is suppressed.
+
+VERIFIED: real-flow HELD; forced-residue repro no-stomp; with-keys survives;
+no-keys byte-identical pre/post; regression 11/0; 3 JS copies synced.
+LIMITATION (honest): still cannot reproduce the user's device timing in headless;
+fix is targeted at the reproduced mechanism + made race-independent, not confirmed
+against the user's actual run. Build: qualiacology-no-moon-v303-sun-route-stomp-fix-hardened.zip
