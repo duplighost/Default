@@ -32,16 +32,19 @@ console with `noMoonCurrentBuild()`.
   window, so outside the (constant-light) throne room it almost never reached the
   damage threshold.
 - **Fix:** the open path rooms are now continuously lit (`return 0.85`), so standing
-  in open sun steadily fills the meter (~1 HP every ~2-3s) and shade drains it (safe).
-  The sun-throne keeps its own phase-based brightness; entry rooms stay safe.
+  in open sun steadily fills the heat meter and shade drains it (safe). The sun-throne
+  keeps its own phase-based brightness; entry rooms stay safe. Observed pace is on the
+  gentle side (~8-10s of continuous open exposure per HP in headless; may differ on a
+  real 60fps device) — easy to tune up if it should bite sooner.
 - **Side effects examined:** `roomBrightAmount39` also feeds sun-touched enemy speed
   (faster in light / slower in shade) and the screen overlay — both stay consistent
   with "sun = dangerous, shade = safe." Non-sun biomes are unaffected (the function
   still returns 0 for them).
-- **Verification note:** this is a deterministic 1-line constant; the throne room is
-  the existing proof that constant light reliably damages. The live combat-room heat
-  could not be driven in headless (the room-transition + safe-haven systems keep
-  resetting a forced non-entry room), so on-device confirmation is recommended.
+- **Verified live (dev build):** walked from the sun entry into a real uncleared path
+  room and confirmed brightness is now a constant 0.85 (no cycle); in open light
+  `exposure='OPEN LIGHT'` and the heat meter climbed 0.02 -> 0.82; moving into a shadow
+  patch flipped `exposure='SHADE'` and drained it 0.82 -> 0. So open sun builds heat and
+  shade is safe, exactly as intended (it never built before, due to the cycle).
 
 ### 3. Hidden max-integrity "pressure" penalty reduced
 - **Symptom:** the "+1 max HP" graft (Hull Weave) looked like it did nothing on the
