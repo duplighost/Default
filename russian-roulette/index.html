@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Last Chamber — 3D Russian Roulette</title>
+<meta name="description" content="Last Chamber: a tense 3D Russian roulette duel against a merciless dealer. Read the odds, call your shot, survive." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%AB%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+
+    <!-- Vignette + film grain overlay -->
+    <div id="vignette"></div>
+    <div id="flash"></div>
+
+    <!-- Heads-up display -->
+    <div id="hud" class="hidden">
+      <div class="hud-row hud-top">
+        <div class="lives" id="dealerLives">
+          <span class="lives-label">DEALER</span>
+          <span class="hearts" id="dealerHearts"></span>
+        </div>
+        <div id="chamberInfo" class="chamber-info">
+          <div class="ci-live"><span id="ciLive">0</span> LIVE</div>
+          <div class="ci-sep">/</div>
+          <div class="ci-blank"><span id="ciBlank">0</span> BLANK</div>
+        </div>
+        <div class="lives" id="playerLives">
+          <span class="lives-label">YOU</span>
+          <span class="hearts" id="playerHearts"></span>
+        </div>
+      </div>
+
+      <div id="message" class="message"></div>
+
+      <div id="actions" class="actions hidden">
+        <button class="btn btn-self" id="btnSelf">
+          <span class="btn-title">Shoot Yourself</span>
+          <span class="btn-sub">Survive a blank &rarr; keep the turn</span>
+        </button>
+        <button class="btn btn-dealer" id="btnDealer">
+          <span class="btn-title">Shoot the Dealer</span>
+          <span class="btn-sub">End your turn either way</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Title / menu screen -->
+    <div id="menu" class="screen">
+      <div class="menu-inner">
+        <h1 class="title">LAST<span>CHAMBER</span></h1>
+        <p class="tagline">A 3D Russian roulette duel. One table. Two players. One loaded cylinder.</p>
+        <button class="btn btn-primary" id="btnStart">Sit Down at the Table</button>
+        <button class="btn btn-ghost" id="btnHow">How to Play</button>
+        <p class="warn">Fiction. A game of nerve and probability &mdash; nothing more.</p>
+      </div>
+    </div>
+
+    <!-- How-to-play overlay -->
+    <div id="how" class="screen hidden">
+      <div class="menu-inner how-inner">
+        <h2>How to Play</h2>
+        <ul class="how-list">
+          <li><b>The cylinder holds 6 chambers</b>, loaded with a mix of <span class="live">live rounds</span> and <span class="blank">blanks</span>. The counts are shown &mdash; the order is not.</li>
+          <li><b>Chambers are not re-spun between pulls.</b> Every trigger pull advances to the next chamber, so counting rounds tells you the odds.</li>
+          <li><b>On your turn, call your shot:</b>
+            <ul>
+              <li><b>Shoot Yourself</b> &mdash; if it's a blank, you keep the turn and go again. If it's live, you take the hit and the turn passes.</li>
+              <li><b>Shoot the Dealer</b> &mdash; a live round costs the dealer a life. Either way, your turn ends.</li>
+            </ul>
+          </li>
+          <li>When the cylinder empties, it's reloaded with a fresh, hidden arrangement.</li>
+          <li><b>Lose all your lives and you lose the duel.</b> Drop the dealer first to walk away.</li>
+        </ul>
+        <button class="btn btn-primary" id="btnHowBack">Back</button>
+      </div>
+    </div>
+
+    <!-- Round / game over banner -->
+    <div id="banner" class="screen hidden">
+      <div class="menu-inner">
+        <h2 id="bannerTitle" class="banner-title"></h2>
+        <p id="bannerText" class="tagline"></p>
+        <button class="btn btn-primary" id="btnBannerAction"></button>
+      </div>
+    </div>
+
+    <div id="loading" class="screen">
+      <div class="menu-inner">
+        <div class="spinner"></div>
+        <p class="tagline">Loading the table&hellip;</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="three.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
